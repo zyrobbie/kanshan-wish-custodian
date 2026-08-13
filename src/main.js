@@ -26,6 +26,7 @@ const log = (message) => { logElement.textContent = `${new Date().toISOString()}
 const email = (input) => input.value.trim().toLowerCase();
 const otp = (input) => input.value.trim();
 const maskId = (value) => value ? `${value.slice(0, 8)}…${value.slice(-4)}` : '未返回';
+let pendingAnonymousAccessToken = null;
 
 if (!config.url || !config.publishableKey || config.url.includes('your-project-ref')) {
   configurationStatus.textContent = '未配置 Supabase 公开 URL / publishable key；远程链路尚未启动。';
@@ -97,12 +98,14 @@ if (!config.url || !config.publishableKey || config.url.includes('your-project-r
   buttons.requestLoginOtp.addEventListener('click', async () => {
     const targetEmail = email(inputs.loginEmail);
     if (!targetEmail) return log('请输入已经绑定过的邮箱。');
+    const { data: currentSession } = await supabase.auth.getSession();
+    pendingAnonymousAccessToken = currentSession.session?.user.is_anonymous ? currentSession.session.access_token : null;
     const { error } = await supabase.auth.signInWithOtp({
       email: targetEmail,
       options: { shouldCreateUser: false },
     });
     if (error) return log(`已有账户 OTP 未发送：${error.message}`);
-    log('已有账户 OTP 已请求：不存在的邮箱不会被此入口自动注册。');
+    log(`已有账户 OTP 已请求：不存在的邮箱不会被此入口自动注册。${pendingAnonymousAccessToken ? ' 当前匿名愿望将在登录后原子迁移。' : ''}`);
   });
 
   buttons.verifyLoginOtp.addEventListener('click', async () => {
@@ -112,6 +115,15 @@ if (!config.url || !config.publishableKey || config.url.includes('your-project-r
     const { data, error } = await supabase.auth.verifyOtp({ email: targetEmail, token, type: 'email' });
     if (error) return log(`登录验证码验证失败：${error.message}`);
     log(`已有账户登录成功：uid=${maskId(data.user?.id)}，匿名=${data.user?.is_anonymous ?? '未返回'}。`);
+    if (pendingAnonymousAccessToken) {
+      const { data: migration, error: migrationError } = await supabase.functions.invoke('migrate-anonymous-wishes', {
+        headers: { 'x-source-authorization': `Bearer ${pendingAnonymousAccessToken}` },
+        body: {},
+      });
+      pendingAnonymousAccessToken = null;
+      if (migrationError || !migration?.ok) return log(`匿名愿望迁移失败：${migration?.error ?? migrationError?.message ?? '未知错误'}；源愿望未被删除，可重试。`);
+      log(`匿名愿望迁移完成：迁入 ${migration.movedCount} 条；再次调用不会复制愿望。`);
+    }
     buttons.writeWish.disabled = false;
     buttons.readWishes.disabled = false;
   });

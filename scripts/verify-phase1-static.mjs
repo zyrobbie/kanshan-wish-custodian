@@ -9,6 +9,8 @@ const required = [
   ['supabase/functions/migrate-anonymous-wishes/index.ts', 'SUPABASE_SERVICE_ROLE_KEY'],
   ['src/main.js', 'shouldCreateUser: false'],
   ['src/main.js', "type: 'email_change'"],
+  ['src/main.js', "migrate-anonymous-wishes"],
+  ['src/main.js', "x-source-authorization"],
 ];
 for (const [file, needle] of required) if (!readFileSync(file, 'utf8').includes(needle)) throw new Error(`Missing Phase 1 control: ${file} -> ${needle}`);
 console.log(`Phase 1 static baseline passed: ${required.length} controls present.`);
