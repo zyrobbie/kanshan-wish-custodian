@@ -1,0 +1,20 @@
+{
+  "name": "kanshan-wish-custodian-phase1",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "check:secrets": "node scripts/secret-scan.mjs",
+    "check:phase1": "node scripts/verify-phase1-static.mjs",
+    "check:dist-secrets": "node scripts/scan-dist-secrets.mjs",
+    "check": "npm run check:secrets && npm run check:phase1 && npm run build && npm run check:dist-secrets"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.57.4"
+  },
+  "devDependencies": {
+    "vite": "^7.1.7"
+  }
+}

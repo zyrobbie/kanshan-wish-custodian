@@ -1,0 +1,15 @@
+# Local environment and credentials. Keep the documented template tracked.
+.env
+.env.local
+.env.*.local
+!.env.example
+.env.taobao.local
+
+# Supabase CLI local state can include project connection details.
+supabase/.temp/
+
+# Tooling output
+node_modules/
+dist/
+coverage/
+.DS_Store

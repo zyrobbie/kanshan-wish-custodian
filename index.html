@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex" />
+    <title>看山 · 阶段 1 诊断</title>
+  </head>
+  <body>
+    <main>
+      <h1>阶段 1：身份与部署诊断</h1>
+      <p>此页只验证 Supabase 身份和愿望持久化链路；不含产品流程或正式视觉。</p>
+      <p id="configuration-status" role="status">正在检查公开配置…</p>
+      <div class="actions">
+        <button id="anonymous-login" type="button">创建或恢复匿名会话</button>
+        <button id="write-wish" type="button" disabled>写入测试愿望</button>
+        <button id="read-wishes" type="button" disabled>读取我的愿望</button>
+      </div>
+      <pre id="diagnostic-log" aria-live="polite"></pre>
+    </main>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
