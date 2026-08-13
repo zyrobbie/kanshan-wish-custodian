@@ -11,8 +11,20 @@ const buttons = {
   anonymousLogin: document.querySelector('#anonymous-login'),
   writeWish: document.querySelector('#write-wish'),
   readWishes: document.querySelector('#read-wishes'),
+  requestEmailLink: document.querySelector('#request-email-link'),
+  verifyEmailLink: document.querySelector('#verify-email-link'),
+  requestLoginOtp: document.querySelector('#request-login-otp'),
+  verifyLoginOtp: document.querySelector('#verify-login-otp'),
+};
+const inputs = {
+  linkEmail: document.querySelector('#link-email'),
+  linkOtp: document.querySelector('#link-otp'),
+  loginEmail: document.querySelector('#login-email'),
+  loginOtp: document.querySelector('#login-otp'),
 };
 const log = (message) => { logElement.textContent = `${new Date().toISOString()} ${message}\n${logElement.textContent}`; };
+const email = (input) => input.value.trim().toLowerCase();
+const otp = (input) => input.value.trim();
 
 if (!config.url || !config.publishableKey || config.url.includes('your-project-ref')) {
   configurationStatus.textContent = '未配置 Supabase 公开 URL / publishable key；远程链路尚未启动。';
@@ -28,6 +40,8 @@ if (!config.url || !config.publishableKey || config.url.includes('your-project-r
     log(`会话已就绪：uid=${result.data.user.id}，匿名=${result.data.user.is_anonymous}`);
     buttons.writeWish.disabled = false;
     buttons.readWishes.disabled = false;
+    buttons.requestEmailLink.disabled = !result.data.user.is_anonymous;
+    buttons.verifyEmailLink.disabled = !result.data.user.is_anonymous;
   });
 
   buttons.writeWish.addEventListener('click', async () => {
@@ -49,5 +63,55 @@ if (!config.url || !config.publishableKey || config.url.includes('your-project-r
     const { data, error } = await supabase.from('wishes').select('id, owner_id, status, created_at').order('created_at', { ascending: false });
     if (error) return log(`读取失败：${error.message}`);
     log(`读取成功：${data.length} 条愿望；仅返回当前 uid 的记录由 RLS 保证。`);
+  });
+
+  buttons.requestEmailLink.addEventListener('click', async () => {
+    const targetEmail = email(inputs.linkEmail);
+    const { data: userData } = await supabase.auth.getUser();
+    if (!userData.user?.is_anonymous) return log('当前不是匿名会话，不能执行匿名邮箱绑定。');
+    if (!targetEmail) return log('请输入要绑定的新邮箱。');
+    const sourceUid = userData.user.id;
+    const { error } = await supabase.auth.updateUser({ email: targetEmail });
+    if (error) return log(`绑定验证码发送失败：${error.message}`);
+    log(`绑定验证码已请求：uid=${sourceUid}。请在新邮箱中查看 Email Change 验证码；不要切换浏览器会话。`);
+  });
+
+  buttons.verifyEmailLink.addEventListener('click', async () => {
+    const targetEmail = email(inputs.linkEmail);
+    const token = otp(inputs.linkOtp);
+    const { data: before } = await supabase.auth.getUser();
+    if (!before.user?.is_anonymous) return log('当前不是待绑定的匿名会话。');
+    if (!targetEmail || !token) return log('请输入新邮箱和邮件中的验证码。');
+    const sourceUid = before.user.id;
+    const { error } = await supabase.auth.verifyOtp({ email: targetEmail, token, type: 'email_change' });
+    if (error) return log(`绑定验证码验证失败：${error.message}`);
+    const { data: after, error: afterError } = await supabase.auth.getUser();
+    if (afterError || !after.user) return log(`验证码已接受，但无法读取更新后的用户：${afterError?.message ?? '未知错误'}`);
+    const uidUnchanged = sourceUid === after.user.id;
+    log(`邮箱绑定完成：uid 未变化=${uidUnchanged}，匿名=${after.user.is_anonymous}。现在可读取愿望，验证原记录仍在。`);
+    buttons.requestEmailLink.disabled = true;
+    buttons.verifyEmailLink.disabled = true;
+  });
+
+  buttons.requestLoginOtp.addEventListener('click', async () => {
+    const targetEmail = email(inputs.loginEmail);
+    if (!targetEmail) return log('请输入已经绑定过的邮箱。');
+    const { error } = await supabase.auth.signInWithOtp({
+      email: targetEmail,
+      options: { shouldCreateUser: false },
+    });
+    if (error) return log(`已有账户 OTP 未发送：${error.message}`);
+    log('已有账户 OTP 已请求：不存在的邮箱不会被此入口自动注册。');
+  });
+
+  buttons.verifyLoginOtp.addEventListener('click', async () => {
+    const targetEmail = email(inputs.loginEmail);
+    const token = otp(inputs.loginOtp);
+    if (!targetEmail || !token) return log('请输入已有邮箱和登录验证码。');
+    const { data, error } = await supabase.auth.verifyOtp({ email: targetEmail, token, type: 'email' });
+    if (error) return log(`登录验证码验证失败：${error.message}`);
+    log(`已有账户登录成功：uid=${data.user?.id ?? '未返回'}，匿名=${data.user?.is_anonymous ?? '未返回'}。`);
+    buttons.writeWish.disabled = false;
+    buttons.readWishes.disabled = false;
   });
 }
