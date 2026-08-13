@@ -25,6 +25,7 @@ const inputs = {
 const log = (message) => { logElement.textContent = `${new Date().toISOString()} ${message}\n${logElement.textContent}`; };
 const email = (input) => input.value.trim().toLowerCase();
 const otp = (input) => input.value.trim();
+const maskId = (value) => value ? `${value.slice(0, 8)}…${value.slice(-4)}` : '未返回';
 
 if (!config.url || !config.publishableKey || config.url.includes('your-project-ref')) {
   configurationStatus.textContent = '未配置 Supabase 公开 URL / publishable key；远程链路尚未启动。';
@@ -37,7 +38,7 @@ if (!config.url || !config.publishableKey || config.url.includes('your-project-r
     const { data: existing } = await supabase.auth.getUser();
     const result = existing.user ? { data: { user: existing.user }, error: null } : await supabase.auth.signInAnonymously();
     if (result.error) return log(`匿名会话失败：${result.error.message}`);
-    log(`会话已就绪：uid=${result.data.user.id}，匿名=${result.data.user.is_anonymous}`);
+    log(`会话已就绪：uid=${maskId(result.data.user.id)}，匿名=${result.data.user.is_anonymous}`);
     buttons.writeWish.disabled = false;
     buttons.readWishes.disabled = false;
     buttons.requestEmailLink.disabled = !result.data.user.is_anonymous;
@@ -56,7 +57,7 @@ if (!config.url || !config.publishableKey || config.url.includes('your-project-r
       status: 'sealed',
     }).select('id, owner_id, status, created_at').single();
     if (error) return log(`测试愿望写入失败：${error.message}`);
-    log(`测试愿望已写入：wish=${data.id}，owner=${data.owner_id}，状态=${data.status}`);
+    log(`测试愿望已写入：wish=${maskId(data.id)}，owner=${maskId(data.owner_id)}，状态=${data.status}`);
   });
 
   buttons.readWishes.addEventListener('click', async () => {
@@ -73,7 +74,7 @@ if (!config.url || !config.publishableKey || config.url.includes('your-project-r
     const sourceUid = userData.user.id;
     const { error } = await supabase.auth.updateUser({ email: targetEmail });
     if (error) return log(`绑定验证码发送失败：${error.message}`);
-    log(`绑定验证码已请求：uid=${sourceUid}。请在新邮箱中查看 Email Change 验证码；不要切换浏览器会话。`);
+    log(`绑定验证码已请求：uid=${maskId(sourceUid)}。请在新邮箱中查看 Email Change 验证码；不要切换浏览器会话。`);
   });
 
   buttons.verifyEmailLink.addEventListener('click', async () => {
@@ -110,7 +111,7 @@ if (!config.url || !config.publishableKey || config.url.includes('your-project-r
     if (!targetEmail || !token) return log('请输入已有邮箱和登录验证码。');
     const { data, error } = await supabase.auth.verifyOtp({ email: targetEmail, token, type: 'email' });
     if (error) return log(`登录验证码验证失败：${error.message}`);
-    log(`已有账户登录成功：uid=${data.user?.id ?? '未返回'}，匿名=${data.user?.is_anonymous ?? '未返回'}。`);
+    log(`已有账户登录成功：uid=${maskId(data.user?.id)}，匿名=${data.user?.is_anonymous ?? '未返回'}。`);
     buttons.writeWish.disabled = false;
     buttons.readWishes.disabled = false;
   });
