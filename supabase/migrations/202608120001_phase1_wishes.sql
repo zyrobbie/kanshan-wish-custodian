@@ -25,13 +25,14 @@ create table if not exists public.wishes (
 create index if not exists wishes_owner_status_expires_at_idx on public.wishes (owner_id, status, expires_at);
 create index if not exists wishes_owner_created_at_idx on public.wishes (owner_id, created_at desc);
 
+grant select, insert, update, delete on table public.wishes to authenticated;
 alter table public.wishes enable row level security;
 alter table public.wishes force row level security;
 
-create policy "wishes_select_own" on public.wishes for select to authenticated using (auth.uid() = owner_id);
-create policy "wishes_insert_own" on public.wishes for insert to authenticated with check (auth.uid() = owner_id);
-create policy "wishes_update_own" on public.wishes for update to authenticated using (auth.uid() = owner_id) with check (auth.uid() = owner_id);
-create policy "wishes_delete_own" on public.wishes for delete to authenticated using (auth.uid() = owner_id);
+create policy "wishes_select_own" on public.wishes for select to authenticated using ((select auth.uid()) = owner_id);
+create policy "wishes_insert_own" on public.wishes for insert to authenticated with check ((select auth.uid()) = owner_id);
+create policy "wishes_update_own" on public.wishes for update to authenticated using ((select auth.uid()) = owner_id) with check ((select auth.uid()) = owner_id);
+create policy "wishes_delete_own" on public.wishes for delete to authenticated using ((select auth.uid()) = owner_id);
 
 create or replace function public.set_wishes_updated_at()
 returns trigger language plpgsql security invoker set search_path = public as $$
