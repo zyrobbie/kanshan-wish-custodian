@@ -1,5 +1,37 @@
 import { createHash } from "node:crypto";
-import { cors, json, requireAllowedOrigin, safeError } from "../_shared/http.ts";
+
+const json = (body: Record<string, unknown>, status = 200, origin?: string | null) => new Response(JSON.stringify(body), {
+  status,
+  headers: {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    ...(origin ? { "access-control-allow-origin": origin, vary: "Origin" } : {}),
+  },
+});
+
+const allowedOrigin = (request: Request) => {
+  const origin = request.headers.get("origin");
+  const configured = (Deno.env.get("ALLOWED_ORIGINS") ?? "").split(",").map((value) => value.trim()).filter(Boolean);
+  return origin && configured.includes(origin) ? origin : null;
+};
+
+const cors = (request: Request) => {
+  if (request.method !== "OPTIONS") return null;
+  const origin = allowedOrigin(request);
+  return new Response(null, {
+    status: origin ? 204 : 403,
+    headers: origin ? {
+      "access-control-allow-origin": origin,
+      "access-control-allow-headers": "authorization, apikey, content-type, x-client-info",
+      "access-control-allow-methods": "POST, OPTIONS",
+      "access-control-max-age": "600",
+      vary: "Origin",
+    } : {},
+  });
+};
+
+const requireAllowedOrigin = (request: Request): string | Response => allowedOrigin(request) ?? json({ ok: false, error: "origin_not_allowed" }, 403);
+const safeError = (error: unknown) => error instanceof Error ? error.message.replace(/Bearer\s+\S+/gi, "Bearer [redacted]") : "request failed";
 
 const formatShanghaiTime = () => new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(new Date()).replace("T", " ");
 const md5 = (value: string) => createHash("md5").update(value, "utf8").digest("hex").toUpperCase();

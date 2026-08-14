@@ -12,6 +12,8 @@ const required = [
   ['src/main.js', "migrate-anonymous-wishes"],
   ['src/main.js', "x-source-authorization"],
   ['index.html', "运行两用户 RLS 越权测试"],
+  ['index.html', "运行淘宝搜索真实冒烟"],
+  ['src/main.js', "products-search"],
   ['src/main.js', "persistSession: false"],
 ];
 for (const [file, needle] of required) if (!readFileSync(file, 'utf8').includes(needle)) throw new Error(`Missing Phase 1 control: ${file} -> ${needle}`);

@@ -12,6 +12,7 @@ const buttons = {
   writeWish: document.querySelector('#write-wish'),
   readWishes: document.querySelector('#read-wishes'),
   runRlsTest: document.querySelector('#run-rls-test'),
+  runProductsSmoke: document.querySelector('#run-products-smoke'),
   requestEmailLink: document.querySelector('#request-email-link'),
   verifyEmailLink: document.querySelector('#verify-email-link'),
   requestLoginOtp: document.querySelector('#request-login-otp'),
@@ -43,6 +44,7 @@ if (!config.url || !config.publishableKey || config.url.includes('your-project-r
     log(`会话已就绪：uid=${maskId(result.data.user.id)}，匿名=${result.data.user.is_anonymous}`);
     buttons.writeWish.disabled = false;
     buttons.readWishes.disabled = false;
+    buttons.runProductsSmoke.disabled = false;
     buttons.requestEmailLink.disabled = !result.data.user.is_anonymous;
     buttons.verifyEmailLink.disabled = !result.data.user.is_anonymous;
   });
@@ -105,6 +107,19 @@ if (!config.url || !config.publishableKey || config.url.includes('your-project-r
       log(`两用户 RLS 测试失败：${error instanceof Error ? error.message : '未知错误'}`);
     } finally {
       buttons.runRlsTest.disabled = false;
+    }
+  });
+
+  buttons.runProductsSmoke.addEventListener('click', async () => {
+    buttons.runProductsSmoke.disabled = true;
+    try {
+      const { data, error } = await supabase.functions.invoke('products-search', { body: { query: '手机壳' } });
+      if (error || !data?.ok) throw new Error(data?.error ?? error?.message ?? '未知错误');
+      log(`淘宝搜索真实冒烟成功：查询已完成，返回 ${Array.isArray(data.products) ? data.products.length : 0} 条规范化结果；响应未记录商品链接或凭据。`);
+    } catch (error) {
+      log(`淘宝搜索真实冒烟失败：${error instanceof Error ? error.message : '未知错误'}。请检查函数日志和联盟应用权限后再定位，不自动重试。`);
+    } finally {
+      buttons.runProductsSmoke.disabled = false;
     }
   });
 
