@@ -1,4 +1,19 @@
-import { cors, json, requireAllowedOrigin, safeError } from "../_shared/http.ts";
+const json = (body: Record<string, unknown>, status = 200, origin?: string | null) => new Response(JSON.stringify(body), {
+  status,
+  headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", ...(origin ? { "access-control-allow-origin": origin, vary: "Origin" } : {}) },
+});
+const allowedOrigin = (request: Request) => {
+  const origin = request.headers.get("origin");
+  const configured = (Deno.env.get("ALLOWED_ORIGINS") ?? "").split(",").map((value) => value.trim()).filter(Boolean);
+  return origin && configured.includes(origin) ? origin : null;
+};
+const cors = (request: Request) => {
+  if (request.method !== "OPTIONS") return null;
+  const origin = allowedOrigin(request);
+  return new Response(null, { status: origin ? 204 : 403, headers: origin ? { "access-control-allow-origin": origin, "access-control-allow-headers": "authorization, apikey, content-type, x-client-info", "access-control-allow-methods": "POST, OPTIONS", "access-control-max-age": "600", vary: "Origin" } : {} });
+};
+const requireAllowedOrigin = (request: Request): string | Response => allowedOrigin(request) ?? json({ ok: false, error: "origin_not_allowed" }, 403);
+const safeError = (error: unknown) => error instanceof Error ? error.message.replace(/Bearer\s+\S+/gi, "Bearer [redacted]") : "request failed";
 
 function findConversion(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object") return null;
@@ -33,6 +48,6 @@ Deno.serve(async (request) => {
     const conversion = findConversion(rpc);
     if (!converted.ok || !conversion || conversion.success !== true || typeof conversion.cpsShortUrl !== "string") return json({ ok: false, error: "provider_unavailable" }, 502, origin);
     console.log(JSON.stringify({ event: "taoke_convert", ok: true, link_type: "cps_short" }));
-    return json({ ok: true, cpsShortUrl: conversion.cpsShortUrl }, 200, origin);
+    return json({ ok: true, linkGenerated: true, linkType: "cps_short" }, 200, origin);
   } catch (error) { console.log(JSON.stringify({ event: "taoke_convert", ok: false, error: safeError(error) })); return json({ ok: false, error: "request_failed" }, 500, typeof origin === "string" ? origin : null); }
 });

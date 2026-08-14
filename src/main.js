@@ -13,6 +13,8 @@ const buttons = {
   readWishes: document.querySelector('#read-wishes'),
   runRlsTest: document.querySelector('#run-rls-test'),
   runProductsSmoke: document.querySelector('#run-products-smoke'),
+  runZhihuSmoke: document.querySelector('#run-zhihu-smoke'),
+  runTaokeSmoke: document.querySelector('#run-taoke-smoke'),
   requestEmailLink: document.querySelector('#request-email-link'),
   verifyEmailLink: document.querySelector('#verify-email-link'),
   requestLoginOtp: document.querySelector('#request-login-otp'),
@@ -45,6 +47,8 @@ if (!config.url || !config.publishableKey || config.url.includes('your-project-r
     buttons.writeWish.disabled = false;
     buttons.readWishes.disabled = false;
     buttons.runProductsSmoke.disabled = false;
+    buttons.runZhihuSmoke.disabled = false;
+    buttons.runTaokeSmoke.disabled = false;
     buttons.requestEmailLink.disabled = !result.data.user.is_anonymous;
     buttons.verifyEmailLink.disabled = !result.data.user.is_anonymous;
   });
@@ -120,6 +124,32 @@ if (!config.url || !config.publishableKey || config.url.includes('your-project-r
       log(`淘宝搜索真实冒烟失败：${error instanceof Error ? error.message : '未知错误'}。请检查函数日志和联盟应用权限后再定位，不自动重试。`);
     } finally {
       buttons.runProductsSmoke.disabled = false;
+    }
+  });
+
+  buttons.runZhihuSmoke.addEventListener('click', async () => {
+    buttons.runZhihuSmoke.disabled = true;
+    try {
+      const { data, error } = await supabase.functions.invoke('zhihu-search', { body: { query: '手机壳' } });
+      if (error || !data?.ok || !Array.isArray(data.items)) throw new Error(data?.error ?? error?.message ?? '未知错误');
+      log(`知乎搜索真实冒烟成功：查询已完成，返回 ${data.items.length} 条规范化结果；响应未记录内容链接或凭据。`);
+    } catch (error) {
+      log(`知乎搜索真实冒烟失败：${error instanceof Error ? error.message : '未知错误'}。请检查函数日志和知乎开放平台权限后再定位，不自动重试。`);
+    } finally {
+      buttons.runZhihuSmoke.disabled = false;
+    }
+  });
+
+  buttons.runTaokeSmoke.addEventListener('click', async () => {
+    buttons.runTaokeSmoke.disabled = true;
+    try {
+      const { data, error } = await supabase.functions.invoke('taoke-convert', { body: { material: 'https://detail.tmall.com/item.htm?id=563049830076' } });
+      if (error || !data?.ok || data.linkGenerated !== true) throw new Error(data?.error ?? error?.message ?? '未知错误');
+      log('淘客转链真实冒烟成功：已生成 CPS 短链；响应与日志均未显示推广链接或凭据。');
+    } catch (error) {
+      log(`淘客转链真实冒烟失败：${error instanceof Error ? error.message : '未知错误'}。请检查函数日志和转链 Skill 授权后再定位，不自动重试。`);
+    } finally {
+      buttons.runTaokeSmoke.disabled = false;
     }
   });
 
