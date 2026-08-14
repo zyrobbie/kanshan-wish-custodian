@@ -13,13 +13,15 @@ const buttons = {
   readWishes: document.querySelector('#read-wishes'),
   runRlsTest: document.querySelector('#run-rls-test'),
   runProductsSmoke: document.querySelector('#run-products-smoke'),
-  verifyPromotionLink: document.querySelector('#verify-promotion-link'),
   runZhihuSmoke: document.querySelector('#run-zhihu-smoke'),
   requestEmailLink: document.querySelector('#request-email-link'),
   verifyEmailLink: document.querySelector('#verify-email-link'),
   requestLoginOtp: document.querySelector('#request-login-otp'),
   verifyLoginOtp: document.querySelector('#verify-login-otp'),
 };
+const promotionLink = document.querySelector('#verify-promotion-link');
+const promotionLinkHost = document.querySelector('#promotion-link-host');
+const promotionLinkCandidate = document.querySelector('#promotion-link-candidate');
 const inputs = {
   linkEmail: document.querySelector('#link-email'),
   linkOtp: document.querySelector('#link-otp'),
@@ -31,7 +33,24 @@ const email = (input) => input.value.trim().toLowerCase();
 const otp = (input) => input.value.trim();
 const maskId = (value) => value ? `${value.slice(0, 8)}…${value.slice(-4)}` : '未返回';
 let pendingAnonymousAccessToken = null;
-let lastPromotionUrl = null;
+let lastPromotionCandidate = null;
+
+const resetPromotionLink = () => {
+  lastPromotionCandidate = null;
+  promotionLink.removeAttribute('href');
+  promotionLink.hidden = true;
+  promotionLinkHost.textContent = '目标域名：尚未取得官方推广链接。';
+  promotionLinkCandidate.textContent = '';
+};
+
+const setPromotionLink = (candidate) => {
+  const destinationHost = new URL(candidate.promotionUrl).hostname;
+  lastPromotionCandidate = candidate;
+  promotionLink.href = candidate.promotionUrl;
+  promotionLink.hidden = false;
+  promotionLinkHost.textContent = `目标域名：${destinationHost}`;
+  promotionLinkCandidate.textContent = `待验证候选：${candidate.title}`;
+};
 
 if (!config.url || !config.publishableKey || config.url.includes('your-project-ref')) {
   configurationStatus.textContent = '未配置 Supabase 公开 URL / publishable key；远程链路尚未启动。';
@@ -119,8 +138,9 @@ if (!config.url || !config.publishableKey || config.url.includes('your-project-r
     try {
       const { data, error } = await supabase.functions.invoke('products-search', { body: { query: '手机壳' } });
       if (error || !data?.ok) throw new Error(data?.error ?? error?.message ?? '未知错误');
-      lastPromotionUrl = Array.isArray(data.products) ? data.products.find((product) => typeof product?.promotionUrl === 'string')?.promotionUrl ?? null : null;
-      buttons.verifyPromotionLink.disabled = !lastPromotionUrl;
+      const candidate = Array.isArray(data.products) ? data.products.find((product) => typeof product?.promotionUrl === 'string' && typeof product?.title === 'string') : null;
+      if (candidate) setPromotionLink(candidate);
+      else resetPromotionLink();
       log(`淘宝搜索真实冒烟成功：查询已完成，返回 ${Array.isArray(data.products) ? data.products.length : 0} 条带官方推广链接的规范化结果；响应未记录推广链接或凭据。`);
     } catch (error) {
       log(`淘宝搜索真实冒烟失败：${error instanceof Error ? error.message : '未知错误'}。请检查函数日志和联盟应用权限后再定位，不自动重试。`);
@@ -140,11 +160,6 @@ if (!config.url || !config.publishableKey || config.url.includes('your-project-r
     } finally {
       buttons.runZhihuSmoke.disabled = false;
     }
-  });
-
-  buttons.verifyPromotionLink.addEventListener('click', () => {
-    if (!lastPromotionUrl) return log('请先完成淘宝搜索，取得官方推广链接后再验证落地。');
-    window.location.assign(lastPromotionUrl);
   });
 
   buttons.requestEmailLink.addEventListener('click', async () => {

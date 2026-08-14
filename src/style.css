@@ -9,4 +9,7 @@ label { display: grid; gap: .35rem; margin-top: .75rem; font-weight: 600; }
 input { min-height: 42px; box-sizing: border-box; padding: .55rem .65rem; font: inherit; }
 .actions { display: flex; flex-wrap: wrap; gap: .75rem; margin: 1.25rem 0; }
 button { min-height: 44px; padding: .65rem .9rem; font: inherit; }
+.promotion-link { display: inline-flex; align-items: center; min-height: 44px; box-sizing: border-box; padding: .65rem .9rem; color: #fff; background: #0f766e; border-radius: .25rem; text-decoration: none; font: inherit; }
+.promotion-link:hover { background: #115e59; }
+.promotion-link-meta { margin: -.5rem 0 1rem; font-size: .9rem; }
 pre { overflow-wrap: anywhere; white-space: pre-wrap; background: #f1f5f9; padding: 1rem; border-radius: .5rem; }

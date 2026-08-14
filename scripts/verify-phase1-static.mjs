@@ -21,11 +21,13 @@ const required = [
   ['index.html', "验证首个官方推广链接落地"],
   ['src/main.js', "products-search"],
   ['src/main.js', "zhihu-search"],
-  ['src/main.js', "window.location.assign(lastPromotionUrl)"],
+  ['index.html', '<a id="verify-promotion-link"'],
+  ['src/main.js', 'promotionLink.href = candidate.promotionUrl'],
+  ['src/main.js', 'destinationHost'],
   ['src/main.js', "persistSession: false"],
 ];
 for (const [file, needle] of required) if (!readFileSync(file, 'utf8').includes(needle)) throw new Error(`Missing Phase 1 control: ${file} -> ${needle}`);
-for (const [file, needle] of [['index.html', '运行淘客转链真实冒烟'], ['src/main.js', 'taoke-convert']]) {
+for (const [file, needle] of [['index.html', '运行淘客转链真实冒烟'], ['src/main.js', 'taoke-convert'], ['src/main.js', 'window.location.assign']]) {
   if (readFileSync(file, 'utf8').includes(needle)) throw new Error(`Deprecated Taoke conversion control still active: ${file} -> ${needle}`);
 }
 console.log(`Phase 1 static baseline passed: ${required.length} controls present.`);
