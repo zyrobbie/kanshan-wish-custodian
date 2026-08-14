@@ -147,7 +147,11 @@ if (!config.url || !config.publishableKey || config.url.includes('your-project-r
     buttons.runTaokeSmoke.disabled = true;
     try {
       const { data, error } = await supabase.functions.invoke('taoke-convert', { body: { material } });
-      if (error || !data?.ok || data.linkGenerated !== true) throw new Error(data?.error ?? error?.message ?? '未知错误');
+      if (error) {
+        const safeError = await error.context?.clone().json().catch(() => null);
+        throw new Error(safeError?.error ?? error.message);
+      }
+      if (!data?.ok || data.linkGenerated !== true) throw new Error(data?.error ?? '未知错误');
       log('淘客转链真实冒烟成功：已生成 CPS 短链；响应与日志均未显示推广链接或凭据。');
     } catch (error) {
       log(`淘客转链真实冒烟失败：${error instanceof Error ? error.message : '未知错误'}。请检查函数日志和转链 Skill 授权后再定位，不自动重试。`);

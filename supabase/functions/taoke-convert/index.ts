@@ -42,11 +42,26 @@ Deno.serve(async (request) => {
     const endpoint = "https://tmcp.taobao.com/mcp/union-ai-platform-server/mcp";
     const headers = { "content-type": "application/json", accept: "application/json, text/event-stream", authorization: `Bearer ${accessKey}` };
     const initialized = await fetch(endpoint, { method: "POST", headers, body: JSON.stringify({ jsonrpc: "2.0", id: crypto.randomUUID(), method: "initialize", params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "kanshan-phase1", version: "0.1.0" } } }), signal: AbortSignal.timeout(10_000) });
-    const sessionId = initialized.headers.get("mcp-session-id"); if (!initialized.ok || !sessionId) return json({ ok: false, error: "provider_unavailable" }, 502, origin);
+    const sessionId = initialized.headers.get("mcp-session-id");
+    if (!initialized.ok || !sessionId) {
+      console.log(JSON.stringify({ event: "taoke_convert", ok: false, stage: "initialize", http_status: initialized.status, session_present: Boolean(sessionId) }));
+      return json({ ok: false, error: "provider_initialize_rejected" }, 502, origin);
+    }
     const converted = await fetch(endpoint, { method: "POST", headers: { ...headers, "mcp-session-id": sessionId }, body: JSON.stringify({ jsonrpc: "2.0", id: crypto.randomUUID(), method: "tools/call", params: { name: "entry", arguments: { arg0: "R1LWxXhl.VRFe", arg1: "query", arg2: "tql_obSb3eZV", arg3: { ...(typeof itemId === "string" ? { itemId } : { material }), pid, siteId, adzoneId, scenarioContext: "看山愿望商店：用户已选择还想买，生成指定推广位 CPS 链接" } } } }), signal: AbortSignal.timeout(10_000) });
     const raw = await converted.text(); const rpc = parseRpcBody(raw);
     const conversion = findConversion(rpc);
-    if (!converted.ok || !conversion || conversion.success !== true || typeof conversion.cpsShortUrl !== "string") return json({ ok: false, error: "provider_unavailable" }, 502, origin);
+    if (!converted.ok) {
+      console.log(JSON.stringify({ event: "taoke_convert", ok: false, stage: "convert_http", http_status: converted.status }));
+      return json({ ok: false, error: "provider_conversion_http_rejected" }, 502, origin);
+    }
+    if (!conversion || conversion.success !== true) {
+      console.log(JSON.stringify({ event: "taoke_convert", ok: false, stage: "convert_result", success: conversion?.success === true }));
+      return json({ ok: false, error: "provider_conversion_rejected" }, 502, origin);
+    }
+    if (typeof conversion.cpsShortUrl !== "string") {
+      console.log(JSON.stringify({ event: "taoke_convert", ok: false, stage: "convert_result", link_present: false }));
+      return json({ ok: false, error: "provider_conversion_missing_link" }, 502, origin);
+    }
     console.log(JSON.stringify({ event: "taoke_convert", ok: true, link_type: "cps_short" }));
     return json({ ok: true, linkGenerated: true, linkType: "cps_short" }, 200, origin);
   } catch (error) { console.log(JSON.stringify({ event: "taoke_convert", ok: false, error: safeError(error) })); return json({ ok: false, error: "request_failed" }, 500, typeof origin === "string" ? origin : null); }
