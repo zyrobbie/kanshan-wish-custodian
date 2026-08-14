@@ -24,6 +24,7 @@ const required = [
   ['index.html', '<a id="verify-promotion-link"'],
   ['src/main.js', 'promotionLink.href = candidate.promotionUrl'],
   ['src/main.js', 'destinationHost'],
+  ['src/style.css', '.promotion-link[hidden] { display: none; }'],
   ['src/main.js', "persistSession: false"],
 ];
 for (const [file, needle] of required) if (!readFileSync(file, 'utf8').includes(needle)) throw new Error(`Missing Phase 1 control: ${file} -> ${needle}`);
