@@ -25,7 +25,7 @@ const inputs = {
   linkOtp: document.querySelector('#link-otp'),
   loginEmail: document.querySelector('#login-email'),
   loginOtp: document.querySelector('#login-otp'),
-  taokeMaterial: document.querySelector('#taoke-material'),
+  taokeItemId: document.querySelector('#taoke-item-id'),
 };
 const log = (message) => { logElement.textContent = `${new Date().toISOString()} ${message}\n${logElement.textContent}`; };
 const email = (input) => input.value.trim().toLowerCase();
@@ -120,7 +120,8 @@ if (!config.url || !config.publishableKey || config.url.includes('your-project-r
     try {
       const { data, error } = await supabase.functions.invoke('products-search', { body: { query: '手机壳' } });
       if (error || !data?.ok) throw new Error(data?.error ?? error?.message ?? '未知错误');
-      log(`淘宝搜索真实冒烟成功：查询已完成，返回 ${Array.isArray(data.products) ? data.products.length : 0} 条规范化结果；响应未记录商品链接或凭据。`);
+      const itemId = Array.isArray(data.products) ? data.products.find((product) => typeof product?.itemId === 'string' && product.itemId.length > 0)?.itemId : null;
+      log(`淘宝搜索真实冒烟成功：查询已完成，返回 ${Array.isArray(data.products) ? data.products.length : 0} 条规范化结果；${itemId ? `首个营销 item_id=${itemId}；` : ''}响应未记录商品链接或凭据。`);
     } catch (error) {
       log(`淘宝搜索真实冒烟失败：${error instanceof Error ? error.message : '未知错误'}。请检查函数日志和联盟应用权限后再定位，不自动重试。`);
     } finally {
@@ -142,11 +143,11 @@ if (!config.url || !config.publishableKey || config.url.includes('your-project-r
   });
 
   buttons.runTaokeSmoke.addEventListener('click', async () => {
-    const material = inputs.taokeMaterial.value.trim();
-    if (!material) return log('请输入当前有效的淘宝短链、商品链接或分享链接，再执行淘客转链诊断。');
+    const itemId = inputs.taokeItemId.value.trim();
+    if (!itemId) return log('请输入淘宝联盟搜索返回的营销 item_id，再执行淘客转链诊断。');
     buttons.runTaokeSmoke.disabled = true;
     try {
-      const { data, error } = await supabase.functions.invoke('taoke-convert', { body: { material } });
+      const { data, error } = await supabase.functions.invoke('taoke-convert', { body: { itemId } });
       if (error) {
         const safeError = await error.context?.clone().json().catch(() => null);
         throw new Error(safeError?.error ?? error.message);
