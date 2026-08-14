@@ -488,6 +488,8 @@ Demo 不替用户判断“该不该买”，也不以高佣商品诱导购买。
 规则：
 
 - 金额统一转为数字；
+- `promotionUrl` 只来自淘宝联盟升级版物料响应的 `item.publish_info.coupon_share_url`，缺失时使用 `item.publish_info.click_url`；`//` 开头的值规范化为 `https://`；
+- 无 `itemId`、标题、价格或有效官方 `promotionUrl` 的记录不进入候选；不得拼接、改写或伪造推广链接；
 - `price` 对应销售价；`finalPrice` 优先取接口的 `final_promotion_price`；
 - `finalPrice` 不存在时使用 `price`，此时标签改为“销售价”，不得称为“到手价”；
 - `predict_rounding_up_price` 只能作为附属的“凑单参考价”展示，必须同时显示条件，不得作为购物卡主价格；
@@ -537,6 +539,8 @@ Demo 不替用户判断“该不该买”，也不以高佣商品诱导购买。
 ```
 
 愿望必须归属于 Supabase Auth 用户。浏览器提交的金额、状态、到期时间和 `ownerId` 均不得直接信任；数据库通过当前登录用户的 `auth.uid()` 和 Row Level Security（RLS）确定归属。
+
+创建愿望时必须将所选候选的 `promotionUrl` 原样保存为愿望快照；24 秒演示到期后“还想买”只使用该快照值，不再调用转链服务。
 
 ### 10.4 UserIdentity
 
