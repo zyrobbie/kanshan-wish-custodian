@@ -25,6 +25,7 @@ const inputs = {
   linkOtp: document.querySelector('#link-otp'),
   loginEmail: document.querySelector('#login-email'),
   loginOtp: document.querySelector('#login-otp'),
+  taokeMaterial: document.querySelector('#taoke-material'),
 };
 const log = (message) => { logElement.textContent = `${new Date().toISOString()} ${message}\n${logElement.textContent}`; };
 const email = (input) => input.value.trim().toLowerCase();
@@ -141,9 +142,11 @@ if (!config.url || !config.publishableKey || config.url.includes('your-project-r
   });
 
   buttons.runTaokeSmoke.addEventListener('click', async () => {
+    const material = inputs.taokeMaterial.value.trim();
+    if (!material) return log('请输入当前有效的淘宝短链、商品链接或分享链接，再执行淘客转链诊断。');
     buttons.runTaokeSmoke.disabled = true;
     try {
-      const { data, error } = await supabase.functions.invoke('taoke-convert', { body: { material: 'https://e.tb.cn/h.8hPj17R34RisFIt?tk=35SkT0jRWwM' } });
+      const { data, error } = await supabase.functions.invoke('taoke-convert', { body: { material } });
       if (error || !data?.ok || data.linkGenerated !== true) throw new Error(data?.error ?? error?.message ?? '未知错误');
       log('淘客转链真实冒烟成功：已生成 CPS 短链；响应与日志均未显示推广链接或凭据。');
     } catch (error) {
