@@ -32,6 +32,14 @@ const cors = (request: Request) => {
 
 const requireAllowedOrigin = (request: Request): string | Response => allowedOrigin(request) ?? json({ ok: false, error: "origin_not_allowed" }, 403);
 const safeError = (error: unknown) => error instanceof Error ? error.message.replace(/Bearer\s+\S+/gi, "Bearer [redacted]") : "request failed";
+const officialPromotionUrl = (value: unknown): string | null => {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const normalized = value.trim().startsWith("//") ? `https:${value.trim()}` : value.trim();
+  try {
+    const parsed = new URL(normalized);
+    return parsed.protocol === "https:" || parsed.protocol === "http:" ? normalized : null;
+  } catch { return null; }
+};
 
 const formatShanghaiTime = () => new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(new Date()).replace("T", " ");
 const md5 = (value: string) => createHash("md5").update(value, "utf8").digest("hex").toUpperCase();
@@ -53,7 +61,17 @@ Deno.serve(async (request) => {
     const data = await response.json();
     if (!response.ok || data.error_response) return json({ ok: false, error: "provider_unavailable" }, 502, origin);
     const items = data.tbk_dg_material_optional_upgrade_response?.result_list?.map_data ?? [];
-    const products = items.slice(0, 5).map((item: Record<string, unknown>) => ({ itemId: item.item_id ?? item.item_id_str, title: item.title ?? (item.item_basic_info as Record<string, unknown> | undefined)?.title, imageUrl: item.pict_url ?? (item.item_basic_info as Record<string, unknown> | undefined)?.pict_url, price: (item.price_promotion_info as Record<string, unknown> | undefined)?.final_promotion_price ?? item.zk_final_price, promotionUrl: item.coupon_share_url ?? item.url })).filter((item: Record<string, unknown>) => item.itemId && item.title && item.price);
+    const products = items.map((item: Record<string, unknown>) => {
+      const publishInfo = item.publish_info as Record<string, unknown> | undefined;
+      const promotionUrl = officialPromotionUrl(publishInfo?.coupon_share_url) ?? officialPromotionUrl(publishInfo?.click_url);
+      return {
+        itemId: item.item_id ?? item.item_id_str,
+        title: item.title ?? (item.item_basic_info as Record<string, unknown> | undefined)?.title,
+        imageUrl: item.pict_url ?? (item.item_basic_info as Record<string, unknown> | undefined)?.pict_url,
+        price: (item.price_promotion_info as Record<string, unknown> | undefined)?.final_promotion_price ?? item.zk_final_price,
+        promotionUrl,
+      };
+    }).filter((item: Record<string, unknown>) => item.itemId && item.title && item.price && item.promotionUrl).slice(0, 5);
     console.log(JSON.stringify({ event: "products_search", ok: true, result_count: products.length }));
     return json({ ok: true, products }, 200, origin);
   } catch (error) { console.log(JSON.stringify({ event: "products_search", ok: false, error: safeError(error) })); return json({ ok: false, error: "request_failed" }, 500, typeof origin === "string" ? origin : null); }

@@ -13,8 +13,8 @@ const buttons = {
   readWishes: document.querySelector('#read-wishes'),
   runRlsTest: document.querySelector('#run-rls-test'),
   runProductsSmoke: document.querySelector('#run-products-smoke'),
+  verifyPromotionLink: document.querySelector('#verify-promotion-link'),
   runZhihuSmoke: document.querySelector('#run-zhihu-smoke'),
-  runTaokeSmoke: document.querySelector('#run-taoke-smoke'),
   requestEmailLink: document.querySelector('#request-email-link'),
   verifyEmailLink: document.querySelector('#verify-email-link'),
   requestLoginOtp: document.querySelector('#request-login-otp'),
@@ -25,13 +25,13 @@ const inputs = {
   linkOtp: document.querySelector('#link-otp'),
   loginEmail: document.querySelector('#login-email'),
   loginOtp: document.querySelector('#login-otp'),
-  taokeItemId: document.querySelector('#taoke-item-id'),
 };
 const log = (message) => { logElement.textContent = `${new Date().toISOString()} ${message}\n${logElement.textContent}`; };
 const email = (input) => input.value.trim().toLowerCase();
 const otp = (input) => input.value.trim();
 const maskId = (value) => value ? `${value.slice(0, 8)}…${value.slice(-4)}` : '未返回';
 let pendingAnonymousAccessToken = null;
+let lastPromotionUrl = null;
 
 if (!config.url || !config.publishableKey || config.url.includes('your-project-ref')) {
   configurationStatus.textContent = '未配置 Supabase 公开 URL / publishable key；远程链路尚未启动。';
@@ -49,7 +49,6 @@ if (!config.url || !config.publishableKey || config.url.includes('your-project-r
     buttons.readWishes.disabled = false;
     buttons.runProductsSmoke.disabled = false;
     buttons.runZhihuSmoke.disabled = false;
-    buttons.runTaokeSmoke.disabled = false;
     buttons.requestEmailLink.disabled = !result.data.user.is_anonymous;
     buttons.verifyEmailLink.disabled = !result.data.user.is_anonymous;
   });
@@ -120,8 +119,9 @@ if (!config.url || !config.publishableKey || config.url.includes('your-project-r
     try {
       const { data, error } = await supabase.functions.invoke('products-search', { body: { query: '手机壳' } });
       if (error || !data?.ok) throw new Error(data?.error ?? error?.message ?? '未知错误');
-      const itemId = Array.isArray(data.products) ? data.products.find((product) => typeof product?.itemId === 'string' && product.itemId.length > 0)?.itemId : null;
-      log(`淘宝搜索真实冒烟成功：查询已完成，返回 ${Array.isArray(data.products) ? data.products.length : 0} 条规范化结果；${itemId ? `首个营销 item_id=${itemId}；` : ''}响应未记录商品链接或凭据。`);
+      lastPromotionUrl = Array.isArray(data.products) ? data.products.find((product) => typeof product?.promotionUrl === 'string')?.promotionUrl ?? null : null;
+      buttons.verifyPromotionLink.disabled = !lastPromotionUrl;
+      log(`淘宝搜索真实冒烟成功：查询已完成，返回 ${Array.isArray(data.products) ? data.products.length : 0} 条带官方推广链接的规范化结果；响应未记录推广链接或凭据。`);
     } catch (error) {
       log(`淘宝搜索真实冒烟失败：${error instanceof Error ? error.message : '未知错误'}。请检查函数日志和联盟应用权限后再定位，不自动重试。`);
     } finally {
@@ -142,23 +142,9 @@ if (!config.url || !config.publishableKey || config.url.includes('your-project-r
     }
   });
 
-  buttons.runTaokeSmoke.addEventListener('click', async () => {
-    const itemId = inputs.taokeItemId.value.trim();
-    if (!itemId) return log('请输入淘宝联盟搜索返回的营销 item_id，再执行淘客转链诊断。');
-    buttons.runTaokeSmoke.disabled = true;
-    try {
-      const { data, error } = await supabase.functions.invoke('taoke-convert', { body: { itemId } });
-      if (error) {
-        const safeError = await error.context?.clone().json().catch(() => null);
-        throw new Error(safeError?.error ?? error.message);
-      }
-      if (!data?.ok || data.linkGenerated !== true) throw new Error(data?.error ?? '未知错误');
-      log('淘客转链真实冒烟成功：已生成 CPS 短链；响应与日志均未显示推广链接或凭据。');
-    } catch (error) {
-      log(`淘客转链真实冒烟失败：${error instanceof Error ? error.message : '未知错误'}。请检查函数日志和转链 Skill 授权后再定位，不自动重试。`);
-    } finally {
-      buttons.runTaokeSmoke.disabled = false;
-    }
+  buttons.verifyPromotionLink.addEventListener('click', () => {
+    if (!lastPromotionUrl) return log('请先完成淘宝搜索，取得官方推广链接后再验证落地。');
+    window.location.assign(lastPromotionUrl);
   });
 
   buttons.requestEmailLink.addEventListener('click', async () => {
