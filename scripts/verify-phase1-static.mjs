@@ -11,6 +11,8 @@ const required = [
   ['src/main.js', "type: 'email_change'"],
   ['src/main.js', "migrate-anonymous-wishes"],
   ['src/main.js', "x-source-authorization"],
+  ['index.html', "运行两用户 RLS 越权测试"],
+  ['src/main.js', "persistSession: false"],
 ];
 for (const [file, needle] of required) if (!readFileSync(file, 'utf8').includes(needle)) throw new Error(`Missing Phase 1 control: ${file} -> ${needle}`);
 console.log(`Phase 1 static baseline passed: ${required.length} controls present.`);

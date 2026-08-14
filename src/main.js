@@ -11,6 +11,7 @@ const buttons = {
   anonymousLogin: document.querySelector('#anonymous-login'),
   writeWish: document.querySelector('#write-wish'),
   readWishes: document.querySelector('#read-wishes'),
+  runRlsTest: document.querySelector('#run-rls-test'),
   requestEmailLink: document.querySelector('#request-email-link'),
   verifyEmailLink: document.querySelector('#verify-email-link'),
   requestLoginOtp: document.querySelector('#request-login-otp'),
@@ -65,6 +66,46 @@ if (!config.url || !config.publishableKey || config.url.includes('your-project-r
     const { data, error } = await supabase.from('wishes').select('id, owner_id, status, created_at').order('created_at', { ascending: false });
     if (error) return log(`读取失败：${error.message}`);
     log(`读取成功：${data.length} 条愿望；仅返回当前 uid 的记录由 RLS 保证。`);
+  });
+
+  buttons.runRlsTest.addEventListener('click', async () => {
+    buttons.runRlsTest.disabled = true;
+    try {
+      const isolatedClient = () => createClient(config.url, config.publishableKey, {
+        auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+      });
+      const userA = isolatedClient();
+      const userB = isolatedClient();
+      const [{ data: aSession, error: aError }, { data: bSession, error: bError }] = await Promise.all([
+        userA.auth.signInAnonymously(), userB.auth.signInAnonymously(),
+      ]);
+      if (aError || bError) throw new Error(aError?.message ?? bError?.message ?? '无法创建测试会话');
+      const { data: created, error: insertError } = await userA.from('wishes').insert({
+        product: { title: '阶段 1 RLS 临时记录', itemId: 'phase1-rls-test' },
+        evidence: { expert: [], experience: [] },
+        custody_hours: 24,
+        demo_duration_seconds: 24,
+        expires_at: new Date(Date.now() + 24_000).toISOString(),
+        status: 'sealed',
+      }).select('id, status').single();
+      if (insertError || !created) throw new Error(insertError?.message ?? '无法创建临时记录');
+      const [{ data: selectedByB, error: selectError }, { data: updatedByB, error: updateError }, { data: deletedByB, error: deleteError }] = await Promise.all([
+        userB.from('wishes').select('id').eq('id', created.id),
+        userB.from('wishes').update({ status: 'abandoned' }).eq('id', created.id).select('id, status'),
+        userB.from('wishes').delete().eq('id', created.id).select('id'),
+      ]);
+      if (selectError || updateError || deleteError) throw new Error(selectError?.message ?? updateError?.message ?? deleteError?.message ?? 'RLS 请求失败');
+      const { data: stillOwnedByA, error: ownerReadError } = await userA.from('wishes').select('id, status').eq('id', created.id).single();
+      if (ownerReadError) throw new Error(ownerReadError.message);
+      const { error: cleanupError } = await userA.from('wishes').delete().eq('id', created.id);
+      if (cleanupError) throw new Error(`临时记录清理失败：${cleanupError.message}`);
+      const denied = selectedByB.length === 0 && updatedByB.length === 0 && deletedByB.length === 0 && stillOwnedByA.status === 'sealed';
+      log(`两用户 RLS 测试：A=${maskId(aSession.user.id)}，B=${maskId(bSession.user.id)}；B 读取/修改/删除均返回 0；A 记录未变且已清理；越权拒绝=${denied}。`);
+    } catch (error) {
+      log(`两用户 RLS 测试失败：${error instanceof Error ? error.message : '未知错误'}`);
+    } finally {
+      buttons.runRlsTest.disabled = false;
+    }
   });
 
   buttons.requestEmailLink.addEventListener('click', async () => {
