@@ -143,7 +143,7 @@ if (!config.url || !config.publishableKey || config.url.includes('your-project-r
   buttons.runTaokeSmoke.addEventListener('click', async () => {
     buttons.runTaokeSmoke.disabled = true;
     try {
-      const { data, error } = await supabase.functions.invoke('taoke-convert', { body: { material: 'https://detail.tmall.com/item.htm?id=563049830076' } });
+      const { data, error } = await supabase.functions.invoke('taoke-convert', { body: { material: 'https://e.tb.cn/h.8hPj17R34RisFIt?tk=35SkT0jRWwM' } });
       if (error || !data?.ok || data.linkGenerated !== true) throw new Error(data?.error ?? error?.message ?? '未知错误');
       log('淘客转链真实冒烟成功：已生成 CPS 短链；响应与日志均未显示推广链接或凭据。');
     } catch (error) {
