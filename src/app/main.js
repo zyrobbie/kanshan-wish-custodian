@@ -3,12 +3,16 @@ import { States, transition } from './state-machine.js';
 import { DemoDurations, remainingSeconds } from './timing.js';
 import { abandonedTotal, displayPrice, plannedSpend } from './pricing.js';
 import { FixtureRepository } from './repository.js';
+import { AsyncTaskGate } from './async-task.js';
+import { Views, openWishFlow } from './navigation.js';
 
 const isDevelopment = import.meta.env.DEV;
 const root = document.querySelector('#app');
 const repository = new FixtureRepository({ mode: isDevelopment ? 'development' : 'production', storage: isDevelopment ? window.sessionStorage : null });
 let flow = isDevelopment ? repository.getFlow() : { state: States.IDLE };
 let timer = null;
+let view = Views.FLOW;
+const taskGate = new AsyncTaskGate();
 
 const statusNames = { [States.SEALED]: '保管中', [States.EXPIRED]: '已到期待决定', [States.PURCHASE_READY]: '决定购买', [States.ABANDONED]: '已放弃', [States.ARCHIVED]: '已归档' };
 const escape = (value) => String(value).replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
@@ -24,9 +28,13 @@ function save(nextState, patch = {}) {
   repository.saveFlow(flow); render();
 }
 
+function invalidateTasks() { taskGate.invalidate(); }
+function taskIsCurrent(token, expectedState) { return view === Views.FLOW && taskGate.isCurrent(token) && flow.state === expectedState; }
+
 function render() {
   clearInterval(timer);
   if (!isDevelopment) { root.innerHTML = `<main class="app-shell unavailable"><h1>阶段 2 尚未接入真实数据</h1><p>正式产品页目前不会把本地 fixture 当成线上结果。请在本地开发环境使用阶段 2 静态流程；阶段 1 诊断仍在 <a href="diagnostic.html">诊断页</a>。</p></main>`; return; }
+  if (view === Views.WISHES) return renderWishes();
   const record = flow.recordId ? repository.getWish(flow.recordId) : null;
   if (record && flow.state === States.SEALED) {
     const current = repository.syncExpiry(record.id);
@@ -44,7 +52,6 @@ function render() {
     case States.EXPIRED: return renderExpired(repository.getWish(flow.recordId));
     case States.PURCHASE_READY: return renderPurchase(repository.getWish(flow.recordId));
     case States.ABANDONED: return renderAbandoned(repository.getWish(flow.recordId));
-    case States.ARCHIVED: return renderWishes();
     case States.ERROR: return renderError();
     default: return renderHome();
   }
@@ -56,11 +63,43 @@ function renderHome() {
   root.querySelectorAll('[data-example]').forEach((button) => button.addEventListener('click', () => { root.querySelector('#search-input').value = button.dataset.example; }));
 }
 
-function renderSearching() { shell(`<section class="center-state"><span class="loader" aria-hidden="true"></span><p class="eyebrow">开发测试数据</p><h1>正在整理静态候选</h1><p>不会访问真实淘宝联盟接口。</p></section>`); setTimeout(async () => { try { const products = await repository.search(flow.query, flow.productMode); save(States.PRODUCT_SELECTING, { products }); } catch (error) { flow = { ...flow, error: error.message }; save(States.ERROR); } }, 420); }
+function renderSearching() {
+  const task = taskGate.begin();
+  const query = flow.query;
+  const productMode = flow.productMode;
+  shell(`<section class="center-state"><span class="loader" aria-hidden="true"></span><p class="eyebrow">开发测试数据</p><h1>正在整理静态候选</h1><p>不会访问真实淘宝联盟接口。</p></section>`);
+  setTimeout(async () => {
+    try {
+      const products = await repository.search(query, productMode);
+      if (!taskIsCurrent(task, States.PRODUCT_SEARCHING)) return;
+      save(States.PRODUCT_SELECTING, { products });
+    } catch (error) {
+      if (!taskIsCurrent(task, States.PRODUCT_SEARCHING)) return;
+      flow = { ...flow, error: error.message };
+      save(States.ERROR);
+    }
+  }, 420);
+}
 
 function renderProducts() { shell(`<section><p class="eyebrow">开发测试数据 · ${escape(flow.query)}</p><h1>从 5 件候选中选择一件</h1><p>价格字段被明确区分：标价、销售价与预估到手价。预估到手价不是最终结算价。</p><div class="products">${flow.products.map((product) => `<article class="product-card">${productSummary(product)}<p class="source">来源：开发 fixture（非淘宝实时结果）</p><button class="secondary" data-product="${product.itemId}">选择这件</button></article>`).join('')}</div><button class="quiet-button" data-action="home">重新输入</button></section>`); root.querySelectorAll('[data-product]').forEach((button) => button.addEventListener('click', () => { const product = flow.products.find((item) => item.itemId === button.dataset.product); if (!product.promotionUrl) { flow = { ...flow, error: '该开发测试候选缺少官方推广链接，不能进入保管流程。' }; save(States.ERROR); return; } save(States.EVIDENCE_LOADING, { product }); })); }
 
-function renderEvidenceLoading() { shell(`<section class="center-state"><span class="loader" aria-hidden="true"></span><p class="eyebrow">开发测试数据</p><h1>正在整理克制消费证据</h1><p>不会请求知乎或任何外部内容。</p></section>`); setTimeout(async () => { try { const evidence = await repository.evidence(flow.evidenceMode); const state = evidence.expert.length && evidence.experience.length ? States.EVIDENCE_READY : States.EVIDENCE_PARTIAL; save(state, { evidence }); } catch (error) { flow = { ...flow, error: error.message }; save(States.ERROR); } }, 350); }
+function renderEvidenceLoading() {
+  const task = taskGate.begin();
+  const evidenceMode = flow.evidenceMode;
+  shell(`<section class="center-state"><span class="loader" aria-hidden="true"></span><p class="eyebrow">开发测试数据</p><h1>正在整理克制消费证据</h1><p>不会请求知乎或任何外部内容。</p></section>`);
+  setTimeout(async () => {
+    try {
+      const evidence = await repository.evidence(evidenceMode);
+      if (!taskIsCurrent(task, States.EVIDENCE_LOADING)) return;
+      const state = evidence.expert.length && evidence.experience.length ? States.EVIDENCE_READY : States.EVIDENCE_PARTIAL;
+      save(state, { evidence });
+    } catch (error) {
+      if (!taskIsCurrent(task, States.EVIDENCE_LOADING)) return;
+      flow = { ...flow, error: error.message };
+      save(States.ERROR);
+    }
+  }, 350);
+}
 
 function evidenceBlock(title, records, empty) { return `<section class="evidence"><h2>${title}</h2>${records.length ? records.map((item) => `<article><span class="source">${escape(item.source)}</span><h3>${escape(item.title)}</h3><p>${escape(item.summary)}</p></article>`).join('') : `<p class="empty">${empty}</p>`}</section>`; }
 function renderEvidence() { const { evidence } = flow; shell(`<section><p class="eyebrow">开发测试数据 · 克制消费证据</p><h1>给决定多一点时间</h1>${productSummary(flow.product)}${evidenceBlock('专业 / 专家类提醒', evidence.expert, '本次未找到专业类证据。')}${evidenceBlock('真实经验类提醒', evidence.experience, '本次未找到经验类证据。')}<p class="notice">这些均是本地开发样例，不是知乎真实搜索结果。证据不足仍可继续保管，但不替你作决定。</p><div class="decision-row"><button class="primary" data-action="custody">继续设置保管时间</button><button class="secondary" data-action="products">返回重选商品</button></div></section>`); }
@@ -72,9 +111,9 @@ function equalButtons() { return `<div class="decision-row equal"><button class=
 function renderExpired(record) { shell(`<section><p class="eyebrow">保管时间到了</p><h1>现在，你想怎么决定？</h1>${productSummary(record.product)}<p>没有默认选择；两个决定的权重相同。</p>${equalButtons()}</section>`); root.querySelectorAll('[data-decision]').forEach((button) => button.addEventListener('click', () => { const result = repository.decide(record.id, button.dataset.decision); flow = repository.getFlow(); flow.recordId = result.id; render(); })); }
 function renderPurchase(record) { shell(`<section><p class="eyebrow">决定购买 · 开发测试占位</p><h1>保留给淘宝页面的最后确认</h1>${productSummary(record.product)}<p>具体价格及优惠以淘宝结算页面为准。阶段 2 不打开真实推广链接，也不代表订单已完成。</p><a class="primary fake-link" href="#fixture-purchase" id="fixture-purchase">开发测试：模拟打开淘宝</a><p id="purchase-message" class="notice"></p><button class="secondary" data-action="wishes">查看我的愿望</button></section>`); root.querySelector('#fixture-purchase').addEventListener('click', () => { root.querySelector('#purchase-message').textContent = '开发测试占位已触发；不产生外跳或订单。'; }); }
 function renderAbandoned(record) { const total = abandonedTotal(repository.list()); shell(`<section><p class="eyebrow">已放弃 · 计划支出记录</p><h1>这次先不买，也是一种决定。</h1>${productSummary(record.product)}<p class="metric">本次避免的计划支出：${displayPrice(plannedSpend(record))}</p><p>当前开发测试记录累计：${displayPrice(total)}。这不是实际到账收益。</p><button class="secondary" data-action="wishes">查看我的愿望</button></section>`); }
-function renderWishes() { const wishes = repository.list(); shell(`<section><p class="eyebrow">开发测试记录</p><h1>我的愿望</h1><p>本页面只展示 sessionStorage 临时样例，正式持久化仍由阶段 1 Supabase 链路承担。</p><button class="secondary" id="seed-history">载入五种状态样例</button><div class="filter-row"><label>筛选状态 <select id="wish-filter"><option value="all">全部</option>${Object.entries(statusNames).map(([status, name]) => `<option value="${status}">${name}</option>`).join('')}</select></label></div><div id="wish-list"></div><button class="quiet-button" data-action="home">开始新的开发测试流程</button></section>`); const list = root.querySelector('#wish-list'); const paint = () => { const selected = root.querySelector('#wish-filter').value; const rows = repository.list().filter((wish) => selected === 'all' || wish.status === selected); list.innerHTML = rows.length ? rows.map((wish) => `<article class="wish-row"><span class="status">${statusNames[wish.status] ?? wish.status}</span><strong>${escape(wish.product.title)}</strong><span>${displayPrice(wish.priceSnapshot.estimatedPrice)}</span></article>`).join('') : '<p class="empty">暂无符合筛选条件的开发测试愿望。</p>'; }; root.querySelector('#seed-history').addEventListener('click', () => { repository.seedHistory(); paint(); }); root.querySelector('#wish-filter').addEventListener('change', paint); paint(); }
+function renderWishes() { shell(`<section><p class="eyebrow">开发测试记录</p><h1>我的愿望</h1><p>这是独立页面视图，不会修改当前愿望的生命周期。正式持久化仍由阶段 1 Supabase 链路承担。</p><button class="secondary" id="seed-history">载入五种状态样例</button><div class="filter-row"><label>筛选状态 <select id="wish-filter"><option value="all">全部</option>${Object.entries(statusNames).map(([status, name]) => `<option value="${status}">${name}</option>`).join('')}</select></label></div><div id="wish-list"></div><button class="quiet-button" data-action="home">开始新的开发测试流程</button></section>`); const list = root.querySelector('#wish-list'); const paint = () => { const selected = root.querySelector('#wish-filter').value; const rows = repository.list().filter((wish) => selected === 'all' || wish.status === selected); list.innerHTML = rows.length ? rows.map((wish) => `<article class="wish-row"><span class="status">${statusNames[wish.status] ?? wish.status}</span><strong>${escape(wish.product.title)}</strong><span>${displayPrice(wish.priceSnapshot.estimatedPrice)}</span>${wish.status === States.SEALED ? `<button class="secondary" data-open-wish="${wish.id}">恢复保管</button>` : ''}</article>`).join('') : '<p class="empty">暂无符合筛选条件的开发测试愿望。</p>'; list.querySelectorAll('[data-open-wish]').forEach((button) => button.addEventListener('click', () => { invalidateTasks(); const record = repository.syncExpiry(button.dataset.openWish); if (!record) return; flow = openWishFlow(record); repository.saveFlow(flow); view = Views.FLOW; render(); })); }; root.querySelector('#seed-history').addEventListener('click', () => { repository.seedHistory(); paint(); }); root.querySelector('#wish-filter').addEventListener('change', paint); paint(); }
 function renderError() { shell(`<section class="error-state"><p class="eyebrow">开发测试错误状态</p><h1>这一步不能继续</h1><p>${escape(flow.error ?? '发生了未分类错误。')}</p><button class="primary" data-action="home">返回首页</button></section>`); }
 
-function handleAction(event) { event.preventDefault(); const action = event.currentTarget.dataset.action; if (action === 'home') { repository.clearFlow(); flow = repository.getFlow(); render(); } if (action === 'wishes') { flow = { ...flow, state: States.ARCHIVED }; renderWishes(); } if (action === 'products') { save(States.PRODUCT_SELECTING); } if (action === 'custody') { save(States.CUSTODY_CONFIG); } }
+function handleAction(event) { event.preventDefault(); const action = event.currentTarget.dataset.action; if (action === 'home') { invalidateTasks(); view = Views.FLOW; repository.clearFlow(); flow = repository.getFlow(); render(); } if (action === 'wishes') { invalidateTasks(); view = Views.WISHES; render(); } if (action === 'products') { view = Views.FLOW; save(States.PRODUCT_SELECTING); } if (action === 'custody') { view = Views.FLOW; save(States.CUSTODY_CONFIG); } }
 function recover() { if (!isDevelopment || !flow.recordId) return; const record = repository.syncExpiry(flow.recordId); if (record?.status === States.EXPIRED && flow.state === States.SEALED) { flow = repository.getFlow(); render(); } else if (flow.state === States.SEALED) render(); }
 document.addEventListener('visibilitychange', () => { if (!document.hidden) recover(); }); window.addEventListener('pageshow', recover); render();

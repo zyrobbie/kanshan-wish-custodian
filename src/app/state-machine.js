@@ -15,7 +15,7 @@ export const States = Object.freeze({
 });
 
 export const transitions = Object.freeze({
-  [States.IDLE]: [States.PRODUCT_SEARCHING, States.ARCHIVED],
+  [States.IDLE]: [States.PRODUCT_SEARCHING],
   [States.PRODUCT_SEARCHING]: [States.PRODUCT_SELECTING, States.ERROR, States.IDLE],
   [States.PRODUCT_SELECTING]: [States.EVIDENCE_LOADING, States.IDLE, States.ERROR],
   [States.EVIDENCE_LOADING]: [States.EVIDENCE_READY, States.EVIDENCE_PARTIAL, States.ERROR],

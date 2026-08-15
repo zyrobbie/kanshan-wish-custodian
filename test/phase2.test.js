@@ -5,6 +5,8 @@ import { DemoDurations, createExpiry, hasExpired, remainingSeconds } from '../sr
 import { abandonedTotal, priceSnapshot } from '../src/app/pricing.js';
 import { FixtureRepository, FixtureUnavailableError } from '../src/app/repository.js';
 import { fixtureProducts } from '../src/app/fixtures.js';
+import { AsyncTaskGate } from '../src/app/async-task.js';
+import { Views, openWishFlow } from '../src/app/navigation.js';
 
 class MemoryStorage { constructor() { this.data = new Map(); } getItem(key) { return this.data.get(key) ?? null; } setItem(key, value) { this.data.set(key, value); } }
 
@@ -66,4 +68,58 @@ test('missing promotion is identifiable and evidence supports partial and none r
   const none = await repo.evidence('none');
   assert.equal(none.expert.length + none.experience.length, 0);
   await assert.rejects(() => repo.evidence('error'), /证据加载失败/);
+});
+
+test('search task becomes stale when the user opens wish list', async () => {
+  const gate = new AsyncTaskGate();
+  const searchTask = gate.begin();
+  let view = Views.FLOW;
+  let writes = 0;
+  const delayedSearch = Promise.resolve().then(() => {
+    if (view === Views.FLOW && gate.isCurrent(searchTask)) writes += 1;
+  });
+  view = Views.WISHES;
+  gate.invalidate();
+  await delayedSearch;
+  assert.equal(view, Views.WISHES);
+  assert.equal(gate.isCurrent(searchTask), false);
+  assert.equal(writes, 0);
+});
+
+test('evidence task becomes stale when the user opens wish list', async () => {
+  const gate = new AsyncTaskGate();
+  let view = Views.FLOW;
+  let writes = 0;
+  const evidenceTask = gate.begin();
+  const delayedEvidence = Promise.resolve().then(() => {
+    if (view === Views.FLOW && gate.isCurrent(evidenceTask)) writes += 1;
+  });
+  view = Views.WISHES;
+  gate.invalidate();
+  await delayedEvidence;
+  assert.equal(view, Views.WISHES);
+  assert.equal(gate.isCurrent(evidenceTask), false);
+  assert.equal(writes, 0);
+});
+
+test('an old async result cannot overwrite a newer view', async () => {
+  const gate = new AsyncTaskGate();
+  const oldTask = gate.begin();
+  let view = Views.FLOW;
+  const delayedResult = Promise.resolve('old candidate').then((result) => {
+    if (view === Views.FLOW && gate.isCurrent(oldTask)) view = result;
+  });
+  view = Views.WISHES;
+  gate.invalidate();
+  await delayedResult;
+  assert.equal(view, Views.WISHES);
+});
+
+test('sealed wish can be reopened from the independent wish-list view', () => {
+  const repo = new FixtureRepository({ storage: new MemoryStorage() });
+  const sealed = repo.seal({ product: fixtureProducts[0], duration: 24, evidence: {}, now: 100 });
+  const restored = openWishFlow(repo.getWish(sealed.id));
+  assert.deepEqual(restored, { state: States.SEALED, recordId: sealed.id });
+  assert.equal(repo.syncExpiry(sealed.id, 1_000).status, States.SEALED);
+  assert.equal(canTransition(States.PRODUCT_SEARCHING, States.ARCHIVED), false);
 });
