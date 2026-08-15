@@ -15,20 +15,20 @@ const required = [
   ['src/main.js', "type: 'email_change'"],
   ['src/main.js', "migrate-anonymous-wishes"],
   ['src/main.js', "x-source-authorization"],
-  ['index.html', "运行两用户 RLS 越权测试"],
-  ['index.html', "运行淘宝搜索真实冒烟"],
-  ['index.html', "运行知乎搜索真实冒烟"],
-  ['index.html', "验证首个官方推广链接落地"],
+  ['diagnostic.html', "运行两用户 RLS 越权测试"],
+  ['diagnostic.html', "运行淘宝搜索真实冒烟"],
+  ['diagnostic.html', "运行知乎搜索真实冒烟"],
+  ['diagnostic.html', "验证首个官方推广链接落地"],
   ['src/main.js', "products-search"],
   ['src/main.js', "zhihu-search"],
-  ['index.html', '<a id="verify-promotion-link"'],
+  ['diagnostic.html', '<a id="verify-promotion-link"'],
   ['src/main.js', 'promotionLink.href = candidate.promotionUrl'],
   ['src/main.js', 'destinationHost'],
   ['src/style.css', '.promotion-link[hidden] { display: none; }'],
   ['src/main.js', "persistSession: false"],
 ];
 for (const [file, needle] of required) if (!readFileSync(file, 'utf8').includes(needle)) throw new Error(`Missing Phase 1 control: ${file} -> ${needle}`);
-for (const [file, needle] of [['index.html', '运行淘客转链真实冒烟'], ['src/main.js', 'taoke-convert'], ['src/main.js', 'window.location.assign']]) {
+for (const [file, needle] of [['diagnostic.html', '运行淘客转链真实冒烟'], ['src/main.js', 'taoke-convert'], ['src/main.js', 'window.location.assign']]) {
   if (readFileSync(file, 'utf8').includes(needle)) throw new Error(`Deprecated Taoke conversion control still active: ${file} -> ${needle}`);
 }
 console.log(`Phase 1 static baseline passed: ${required.length} controls present.`);
