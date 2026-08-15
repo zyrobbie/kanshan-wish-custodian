@@ -75,5 +75,5 @@
 
 阶段 2 的本地静态流程出口条件：**通过**。本结论只覆盖静态结构、自动化检查和本地浏览器验收；不代表真实数据、正式持久化或线上部署完成。
 
-当前阶段 2 功能提交：`19998f7`（`feat: complete phase 2 static product flow`）。
+阶段 2 冻结代码基线：`4c29383`（`fix: guard phase 2 async navigation`）。初始功能提交为 `19998f7`（`feat: complete phase 2 static product flow`）；`4c29383` 已包含异步导航返工与独立浏览器复验后的最终阶段 2 功能修复。
 明确声明：**未进入阶段 3，未推送、未合并、未部署。**
