@@ -9,7 +9,7 @@ const required = [
   ['src/app/repository.js', 'FixtureUnavailableError'],
   ['src/app/async-task.js', 'AsyncTaskGate'],
   ['src/app/navigation.js', "WISHES: 'wishes'"],
-  ['src/app/main.js', '阶段 2 尚未接入真实数据'],
+  ['src/app/main.js', 'fixtureMode'],
   ['src/app/main.js', 'taskIsCurrent'],
   ['src/app/main.js', 'data-open-wish'],
   ['src/app/main.js', 'visibilitychange'],

@@ -1,78 +1,50 @@
 import { createHash } from "node:crypto";
-
-const json = (body: Record<string, unknown>, status = 200, origin?: string | null) => new Response(JSON.stringify(body), {
-  status,
-  headers: {
-    "content-type": "application/json; charset=utf-8",
-    "cache-control": "no-store",
-    ...(origin ? { "access-control-allow-origin": origin, vary: "Origin" } : {}),
-  },
-});
-
-const allowedOrigin = (request: Request) => {
-  const origin = request.headers.get("origin");
-  const configured = (Deno.env.get("ALLOWED_ORIGINS") ?? "").split(",").map((value) => value.trim()).filter(Boolean);
-  return origin && configured.includes(origin) ? origin : null;
-};
-
-const cors = (request: Request) => {
-  if (request.method !== "OPTIONS") return null;
-  const origin = allowedOrigin(request);
-  return new Response(null, {
-    status: origin ? 204 : 403,
-    headers: origin ? {
-      "access-control-allow-origin": origin,
-      "access-control-allow-headers": "authorization, apikey, content-type, x-client-info",
-      "access-control-allow-methods": "POST, OPTIONS",
-      "access-control-max-age": "600",
-      vary: "Origin",
-    } : {},
-  });
-};
-
-const requireAllowedOrigin = (request: Request): string | Response => allowedOrigin(request) ?? json({ ok: false, error: "origin_not_allowed" }, 403);
-const safeError = (error: unknown) => error instanceof Error ? error.message.replace(/Bearer\s+\S+/gi, "Bearer [redacted]") : "request failed";
-const officialPromotionUrl = (value: unknown): string | null => {
-  if (typeof value !== "string" || !value.trim()) return null;
-  const normalized = value.trim().startsWith("//") ? `https:${value.trim()}` : value.trim();
-  try {
-    const parsed = new URL(normalized);
-    return parsed.protocol === "https:" || parsed.protocol === "http:" ? normalized : null;
-  } catch { return null; }
-};
+import { cors, json, requireAllowedOrigin } from "../_shared/http.ts";
+import { classifyProviderFailure, normalizeProducts, normalizeQuery } from "../_shared/taobao-product.js";
 
 const formatShanghaiTime = () => new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(new Date()).replace("T", " ");
 const md5 = (value: string) => createHash("md5").update(value, "utf8").digest("hex").toUpperCase();
+const log = (ok: boolean, category: string, resultCount: number, startedAt: number) => console.log(JSON.stringify({ event: "products_search", ok, category, result_count: resultCount, duration_ms: Date.now() - startedAt }));
+
+const providerCode = (data: unknown) => {
+  const error = data && typeof data === "object" ? (data as Record<string, unknown>).error_response : null;
+  return error && typeof error === "object" ? String((error as Record<string, unknown>).sub_code ?? (error as Record<string, unknown>).code ?? "") : "";
+};
 
 Deno.serve(async (request) => {
+  const startedAt = Date.now();
   const preflight = cors(request); if (preflight) return preflight;
-  const origin = requireAllowedOrigin(request); if (origin instanceof Response) return origin;
+  const origin = requireAllowedOrigin(request); if (origin instanceof Response) { log(false, "origin_not_allowed", 0, startedAt); return origin; }
+  if (request.method !== "POST") { log(false, "request_failed", 0, startedAt); return json({ ok: false, error: "request_failed" }, 405, origin); }
+  if (!request.headers.get("authorization")) { log(false, "authentication_required", 0, startedAt); return json({ ok: false, error: "authentication_required" }, 401, origin); }
   try {
-    const { query } = await request.json();
-    const normalized = typeof query === "string" ? query.trim().replace(/\s+/g, " ") : "";
-    if (normalized.length < 2 || normalized.length > 80) return json({ ok: false, error: "invalid_query" }, 400, origin);
+    const body = await request.json();
+    const query = normalizeQuery(body?.query);
+    if (!query) { log(false, "invalid_query", 0, startedAt); return json({ ok: false, error: "invalid_query" }, 400, origin); }
     const key = Deno.env.get("TAOBAO_APP_KEY"); const secret = Deno.env.get("TAOBAO_APP_SECRET");
     const pid = Deno.env.get("TAOBAO_PID"); const adzoneId = Deno.env.get("TAOBAO_ADZONE_ID");
-    if (!key || !secret || !pid || !adzoneId) return json({ ok: false, error: "service_not_configured" }, 503, origin);
-    const parts = pid.split("_"); if (parts.length !== 4 || parts[3] !== adzoneId) return json({ ok: false, error: "service_misconfigured" }, 503, origin);
-    const params: Record<string, string> = { method: "taobao.tbk.dg.material.optional.upgrade", app_key: key, timestamp: formatShanghaiTime(), format: "json", v: "2.0", sign_method: "md5", adzone_id: adzoneId, site_id: parts[2], material_id: "80309", biz_scene_id: "1", q: normalized, page_no: "1", page_size: "5" };
-    const payload = Object.keys(params).sort().map((name) => `${name}${params[name]}`).join(""); params.sign = md5(`${secret}${payload}${secret}`);
+    if (!key || !secret || !pid || !adzoneId) { log(false, "service_not_configured", 0, startedAt); return json({ ok: false, error: "service_not_configured" }, 503, origin); }
+    const parts = pid.split("_");
+    if (parts.length !== 4 || parts[3] !== adzoneId || !parts[2]) { log(false, "service_misconfigured", 0, startedAt); return json({ ok: false, error: "service_misconfigured" }, 503, origin); }
+    const params: Record<string, string> = { method: "taobao.tbk.dg.material.optional.upgrade", app_key: key, timestamp: formatShanghaiTime(), format: "json", v: "2.0", sign_method: "md5", adzone_id: adzoneId, site_id: parts[2], material_id: "80309", biz_scene_id: "1", q: query, page_no: "1", page_size: "5" };
+    const payload = Object.keys(params).sort().map((name) => `${name}${params[name]}`).join("");
+    params.sign = md5(`${secret}${payload}${secret}`);
     const response = await fetch("https://eco.taobao.com/router/rest", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded;charset=UTF-8" }, body: new URLSearchParams(params), signal: AbortSignal.timeout(10_000) });
     const data = await response.json();
-    if (!response.ok || data.error_response) return json({ ok: false, error: "provider_unavailable" }, 502, origin);
-    const items = data.tbk_dg_material_optional_upgrade_response?.result_list?.map_data ?? [];
-    const products = items.map((item: Record<string, unknown>) => {
-      const publishInfo = item.publish_info as Record<string, unknown> | undefined;
-      const promotionUrl = officialPromotionUrl(publishInfo?.coupon_share_url) ?? officialPromotionUrl(publishInfo?.click_url);
-      return {
-        itemId: item.item_id ?? item.item_id_str,
-        title: item.title ?? (item.item_basic_info as Record<string, unknown> | undefined)?.title,
-        imageUrl: item.pict_url ?? (item.item_basic_info as Record<string, unknown> | undefined)?.pict_url,
-        price: (item.price_promotion_info as Record<string, unknown> | undefined)?.final_promotion_price ?? item.zk_final_price,
-        promotionUrl,
-      };
-    }).filter((item: Record<string, unknown>) => item.itemId && item.title && item.price && item.promotionUrl).slice(0, 5);
-    console.log(JSON.stringify({ event: "products_search", ok: true, result_count: products.length }));
+    if (!response.ok || (data && typeof data === "object" && "error_response" in data)) {
+      const error = classifyProviderFailure({ status: response.status, code: providerCode(data) });
+      log(false, error, 0, startedAt); return json({ ok: false, error }, 502, origin);
+    }
+    const responseBody = data as Record<string, unknown>;
+    const providerResponse = responseBody.tbk_dg_material_optional_upgrade_response as Record<string, unknown> | undefined;
+    const resultList = providerResponse?.result_list as Record<string, unknown> | undefined;
+    const products = normalizeProducts(resultList?.map_data, { query, fetchedAt: new Date().toISOString() });
+    log(true, products.length ? "success" : "empty_result", products.length, startedAt);
     return json({ ok: true, products }, 200, origin);
-  } catch (error) { console.log(JSON.stringify({ event: "products_search", ok: false, error: safeError(error) })); return json({ ok: false, error: "request_failed" }, 500, typeof origin === "string" ? origin : null); }
+  } catch (error) {
+    const category = classifyProviderFailure({ name: error instanceof Error ? error.name : undefined });
+    const stableError = category === "provider_timeout" ? category : "request_failed";
+    log(false, stableError, 0, startedAt);
+    return json({ ok: false, error: stableError }, stableError === "provider_timeout" ? 504 : 500, origin);
+  }
 });

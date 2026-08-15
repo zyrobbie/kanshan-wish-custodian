@@ -2,6 +2,8 @@ export const States = Object.freeze({
   IDLE: 'idle',
   PRODUCT_SEARCHING: 'product_searching',
   PRODUCT_SELECTING: 'product_selecting',
+  PRODUCT_SELECTED: 'product_selected',
+  PRODUCT_EMPTY: 'product_empty',
   EVIDENCE_LOADING: 'evidence_loading',
   EVIDENCE_READY: 'evidence_ready',
   EVIDENCE_PARTIAL: 'evidence_partial',
@@ -16,8 +18,10 @@ export const States = Object.freeze({
 
 export const transitions = Object.freeze({
   [States.IDLE]: [States.PRODUCT_SEARCHING],
-  [States.PRODUCT_SEARCHING]: [States.PRODUCT_SELECTING, States.ERROR, States.IDLE],
-  [States.PRODUCT_SELECTING]: [States.EVIDENCE_LOADING, States.IDLE, States.ERROR],
+  [States.PRODUCT_SEARCHING]: [States.PRODUCT_SELECTING, States.PRODUCT_EMPTY, States.ERROR, States.IDLE],
+  [States.PRODUCT_EMPTY]: [States.IDLE, States.PRODUCT_SEARCHING],
+  [States.PRODUCT_SELECTING]: [States.EVIDENCE_LOADING, States.PRODUCT_SELECTED, States.IDLE, States.ERROR],
+  [States.PRODUCT_SELECTED]: [States.IDLE, States.PRODUCT_SELECTING],
   [States.EVIDENCE_LOADING]: [States.EVIDENCE_READY, States.EVIDENCE_PARTIAL, States.ERROR],
   [States.EVIDENCE_READY]: [States.CUSTODY_CONFIG, States.PRODUCT_SELECTING],
   [States.EVIDENCE_PARTIAL]: [States.CUSTODY_CONFIG, States.PRODUCT_SELECTING],
