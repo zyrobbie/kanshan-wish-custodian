@@ -11,8 +11,9 @@ import { ZhihuEvidenceService, ZhihuEvidenceError } from './zhihu-service.js';
 import { EvidenceTestService, evidenceTestName } from './evidence-test-scenarios.js';
 import { AuthService } from './auth-service.js';
 import { WishesService } from './wishes-service.js';
-import { buildWishScenario, wishTestNames } from './wish-test-scenarios.js';
+import { createWishTestHarness, wishTestNames } from './wish-test-scenarios.js';
 import { expiryFromServer, groupWishes, summarizeWishes, WishStatuses } from './wish-domain.js';
+import { recoveryTarget } from './wish-recovery.js';
 
 const isDevelopment = import.meta.env.DEV;
 const root = document.querySelector('#app');
@@ -31,7 +32,7 @@ const wishScenario = (() => {
   const savedSeed = Number(window.sessionStorage.getItem(seedKey));
   const seed = Number.isFinite(savedSeed) && savedSeed > 0 ? savedSeed : Date.now();
   window.sessionStorage.setItem(seedKey, String(seed));
-  return buildWishScenario(wishTest, seed);
+  return createWishTestHarness(wishTest, seed);
 })();
 const repository = new FixtureRepository({ mode: fixtureMode ? 'development' : 'production', storage: fixtureMode ? window.sessionStorage : null });
 const localWishFlow = wishTestMode && !productTestMode;
@@ -43,6 +44,7 @@ let flow = fixtureMode ? repository.getFlow() : { state: States.IDLE };
 let timer = null;
 let view = Views.FLOW;
 const taskGate = new AsyncTaskGate();
+let recoveryInFlight = false;
 
 const statusNames = { [States.SEALED]: '保管中', [States.EXPIRED]: '已到期待决定', [States.PURCHASE_READY]: '决定购买', [States.ABANDONED]: '已放弃', [States.ARCHIVED]: '已归档' };
 const escape = (value) => String(value).replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
@@ -230,7 +232,7 @@ async function createCustody(duration, button) {
 }
 function renderCustody() { const label = wishTestMode ? `阶段 5 开发测试情景 · ${wishTest}` : '演示时间'; shell(`<section><p class="eyebrow">${label}</p><h1>这次想保管多久？</h1>${productSlot}<p>正式产品对应 24 / 48 / 72 小时；当前 Demo 分别压缩为 24 / 48 / 72 秒。</p><div class="duration-list">${DemoDurations.map((seconds) => `<button class="duration" data-duration="${seconds}"><b>${seconds} 秒</b><span>对应 ${seconds} 小时</span></button>`).join('')}</div><p class="notice">创建与到期由服务端时间决定；刷新、页面恢复或后台返回时都会重新读取。</p></section>`); mountProductSummary(flow.product); root.querySelectorAll('[data-duration]').forEach((button) => button.addEventListener('click', () => createCustody(Number(button.dataset.duration), button))); }
 
-function renderSealed(record) { if (!record) return renderWishes(); const update = () => { const left = expiryFromServer(record.expiresAt); if (left <= 0) { flow = { ...flow, record: { ...record, status: States.EXPIRED }, state: States.EXPIRED }; render(); return; } const counter = root.querySelector('#countdown'); if (counter) counter.textContent = `${left} 秒`; }; shell(`<section class="sealed"><p class="eyebrow">已封存 · 演示模式</p><h1>先把它放在这里。</h1>${productSlot}<div class="countdown" id="countdown" aria-live="polite">${expiryFromServer(record.expiresAt)} 秒</div><p>预计到期：${new Date(record.expiresAt).toLocaleTimeString('zh-CN')}</p><p class="notice">倒计时以服务端保存的到期时间为准。</p></section>`); mountProductSummary(record.product); update(); timer = setInterval(update, 500); }
+function renderSealed(record) { if (!record) return renderWishes(); const update = () => { const left = expiryFromServer(record.expiresAt); if (left <= 0) { flow = { ...flow, record: { ...record, status: States.EXPIRED }, state: States.EXPIRED }; render(); return; } const counter = root.querySelector('#countdown'); if (counter) counter.textContent = `${left} 秒`; }; shell(`<section class="sealed"><p class="eyebrow">已封存 · 演示模式</p><h1>先把它放在这里。</h1>${productSlot}<div class="countdown" id="countdown" aria-live="polite">${expiryFromServer(record.expiresAt)} 秒</div><p>预计到期：<time id="expiry-time"></time></p><p class="notice">倒计时以服务端保存的到期时间为准。</p></section>`); const expiry = root.querySelector('#expiry-time'); expiry.dateTime = record.expiresAt; expiry.textContent = new Date(record.expiresAt).toLocaleTimeString('zh-CN'); mountProductSummary(record.product); update(); timer = setInterval(update, 500); }
 function equalButtons() { return `<div class="decision-row equal"><button class="decision" data-decision="purchase">我还是想买</button><button class="decision" data-decision="abandon">这次不买了</button></div>`; }
 async function decideCustody(record, decision, button) { button.disabled = true; try { const result = fixtureMode ? repository.decide(record.id, decision) : wishTestMode ? wishScenario.store.decide(record.id, decision) : await wishesService.decide(record.id, decision); const normalized = normalizeWish(result); flow = { ...flow, record: normalized, state: normalized.status === WishStatuses.PURCHASED_INTENT ? States.PURCHASE_READY : States.ABANDONED }; render(); } catch (error) { flow = { ...flow, error: error instanceof Error ? error.message : '决定保存失败。', state: States.ERROR }; render(); } }
 function renderExpired(record) { shell(`<section><p class="eyebrow">保管时间到了</p><h1>现在，你想怎么决定？</h1>${productSlot}<p>没有默认选择；两个决定的权重相同。</p>${equalButtons()}</section>`); mountProductSummary(record.product); root.querySelectorAll('[data-decision]').forEach((button) => button.addEventListener('click', () => decideCustody(record, button.dataset.decision, button))); }
@@ -256,7 +258,11 @@ function appendWishRow(list, wish) {
   row.append(status, title, price);
   if (wish.status === WishStatuses.SEALED) { const open = document.createElement('button'); open.className = 'secondary'; open.setAttribute('data-open-wish', wish.id); open.textContent = '恢复保管'; open.addEventListener('click', () => { invalidateTasks(); flow = { state: States.SEALED, record: wish, recordId: wish.id }; view = Views.FLOW; render(); }); row.append(open); }
   if (wish.status === WishStatuses.EXPIRED) { const open = document.createElement('button'); open.className = 'secondary'; open.textContent = '现在决定'; open.addEventListener('click', () => { flow = { state: States.EXPIRED, record: wish, recordId: wish.id }; view = Views.FLOW; render(); }); row.append(open); }
-  const remove = document.createElement('button'); remove.className = 'quiet-button'; remove.textContent = '删除'; remove.addEventListener('click', async () => { if (!window.confirm('确定删除这条愿望吗？此操作不可恢复。')) return; if (fixtureMode) repository.state?.delete?.(wish.id); else if (wishTestMode) wishScenario.store.delete(wish.id); else await wishesService.remove(wish.id); renderWishes(); }); row.append(remove); list.append(row);
+  const remove = document.createElement('button'); remove.className = 'quiet-button'; remove.textContent = '删除'; remove.addEventListener('click', async () => {
+    if (!window.confirm('确定删除这条愿望吗？此操作不可恢复。')) return;
+    try { if (fixtureMode) repository.state?.delete?.(wish.id); else if (wishTestMode) wishScenario.store.delete(wish.id); else await wishesService.remove(wish.id); renderWishes(); }
+    catch (error) { const summary = root.querySelector('#wish-summary'); if (summary) summary.textContent = error instanceof Error ? error.message : '删除失败，请重试。'; }
+  }); row.append(remove); list.append(row);
 }
 function renderWishes() {
   shell(`<section><p class="eyebrow">${wishTestMode ? `阶段 5 开发测试情景 · ${wishTest}` : '服务端愿望保管箱'}</p><h1>我的愿望</h1><p>愿望、状态和统计从当前身份的服务端记录读取；列表导航不会改变愿望生命周期。</p><p id="wish-summary" class="notice"></p><div id="wish-list"></div><button class="secondary" id="clear-wishes">清空愿望</button><button class="quiet-button" id="sign-out">退出当前设备</button><button class="quiet-button" id="delete-account">删除账户</button><button class="quiet-button" data-action="home">开始新的搜索</button></section>`);
@@ -281,6 +287,16 @@ function renderWishes() {
     identity.append(email, token, bind, verifyBind, requestLogin, verifyLogin, message);
   }
   list.before(identity);
+  if (wishTestMode) {
+    const testPanel = document.createElement('section'); testPanel.className = 'test-panel';
+    const title = document.createElement('h2'); title.textContent = '开发测试行为';
+    const hint = document.createElement('p'); hint.textContent = '此操作只执行本地开发存储与 Auth stub，不代表真实 Supabase 或邮件验收。';
+    const run = document.createElement('button'); run.className = 'secondary'; run.id = 'run-wish-test'; run.textContent = '执行当前测试行为';
+    const result = document.createElement('p'); result.className = 'notice'; result.id = 'wish-test-result';
+    if (wishScenario.outcome) result.textContent = `本地行为结果：${Object.entries(wishScenario.outcome).map(([name, value]) => `${name}=${String(value)}`).join(' · ')}`;
+    run.addEventListener('click', async () => { run.disabled = true; try { await wishScenario.run(); renderWishes(); } catch (error) { result.textContent = `本地行为失败：${error?.code ?? 'request_failed'}`; run.disabled = false; } });
+    testPanel.append(title, hint, run, result); identity.after(testPanel);
+  }
   (async () => { try {
     let page = await getWishPage(0); const wishes = [...page.items]; const stats = page.summary ?? summarizeWishes(wishes);
     summary.textContent = `保管中 ${stats.sealedCount} 条 · 待决定 ${stats.expiredCount} 条 · 已放下计划支出 ${displayPrice(stats.abandonedListedAmount)}`;
@@ -290,10 +306,30 @@ function renderWishes() {
   root.querySelector('#clear-wishes').textContent = '清空已完成愿望';
   root.querySelector('#clear-wishes').addEventListener('click', async () => { if (!window.confirm('确认清空已完成愿望？保管中和待决定愿望不会被删除。')) return; try { if (fixtureMode) repository.clearFlow(); else if (wishTestMode) wishScenario.store.clearCompleted?.(); else await wishesService.clear(); renderWishes(); } catch (error) { summary.textContent = error instanceof Error ? error.message : '清空失败，请重试。'; } });
   root.querySelector('#sign-out').addEventListener('click', async () => { try { if (authService) await authService.signOut({ scope: 'local' }); flow={state:States.IDLE}; view=Views.FLOW; render(); } catch (error) { summary.textContent = error instanceof Error ? error.message : '退出失败，请重试。'; } });
-  root.querySelector('#delete-account').addEventListener('click', async () => { if (!window.confirm('删除账户会删除全部愿望和绑定身份，确定继续吗？') || !window.confirm('请再次确认：此操作不可恢复。')) return; try { if (wishTestMode) { wishScenario.store.clear(); flow={state:States.IDLE}; view=Views.FLOW; render(); return; } await wishesService.deleteAccount(); await authService.signOut({ scope: 'local' }); flow={state:States.IDLE}; view=Views.FLOW; render(); } catch (error) { summary.textContent = error instanceof Error ? error.message : '删除账户失败，请重试。'; } });
+  root.querySelector('#delete-account').addEventListener('click', async () => { if (!window.confirm('删除账户会删除全部愿望和绑定身份，确定继续吗？') || !window.confirm('请再次确认：此操作不可恢复。')) return; try {
+    if (wishTestMode) { wishScenario.store.clear(); flow={state:States.IDLE}; view=Views.FLOW; render(); return; }
+    await wishesService.deleteAccount();
+    // A deleted server user can make a subsequent local sign-out report
+    // "user not found". Deletion is already authoritative, so always clear UI.
+    try { await authService.signOut({ scope: 'local' }); } catch { /* local cleanup continues after successful deletion */ }
+    flow={state:States.IDLE}; view=Views.FLOW; render();
+  } catch (error) { summary.textContent = error instanceof Error ? error.message : '删除账户失败，请重试。'; } });
 }
 function renderError() { const label = fixtureMode ? '开发测试错误状态' : productTestMode || evidenceTestMode ? `开发测试情景 · ${evidenceTest ?? productTest}` : flow.failedStage === 'evidence' ? '知乎证据未完成' : '商品搜索未完成'; shell(`<section class="error-state"><p class="eyebrow">${label}</p><h1>这一步不能继续</h1><p>${escape(flow.error ?? '发生了未分类错误。')}</p><button class="primary" data-action="home">返回首页</button></section>`); }
 
 function handleAction(event) { event.preventDefault(); const action = event.currentTarget.dataset.action; if (action === 'home') { invalidateTasks(); view = Views.FLOW; if (fixtureMode) repository.clearFlow(); flow = fixtureMode ? repository.getFlow() : { state: States.IDLE }; render(); } if (action === 'wishes') { invalidateTasks(); view = Views.WISHES; render(); } if (action === 'products') { invalidateTasks(); view = Views.FLOW; save(States.PRODUCT_SELECTING); } if (action === 'custody') { view = Views.FLOW; save(States.CUSTODY_CONFIG); } }
-async function recover() { if (!flow.recordId && !flow.record) return; try { const wishes = await getTimeline(); const record = wishes.find((wish) => wish.id === (flow.recordId ?? flow.record?.id)); if (!record) return; flow = { ...flow, record, recordId: record.id, state: record.status === WishStatuses.EXPIRED ? States.EXPIRED : record.status === WishStatuses.SEALED ? States.SEALED : record.status === WishStatuses.ABANDONED ? States.ABANDONED : States.PURCHASE_READY }; render(); } catch { /* refresh only: the current visible state remains usable */ } }
-document.addEventListener('visibilitychange', () => { if (!document.hidden) recover(); }); window.addEventListener('pageshow', recover); render();
+async function recover() {
+  if (recoveryInFlight || fixtureMode || productTestMode) return;
+  recoveryInFlight = true;
+  try {
+    if (wishTestMode) wishScenario.prepareRecovery();
+    else await authService.ensureSession();
+    const target = recoveryTarget(await getTimeline());
+    if (target.reason === 'none_active') return;
+    view = target.view;
+    if (target.record) flow = { state: target.state, record: target.record, recordId: target.record.id };
+    render();
+  } catch { /* recovery never replaces a usable view with a raw provider error */ }
+  finally { recoveryInFlight = false; }
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) void recover(); }); window.addEventListener('pageshow', () => void recover()); render(); void recover();

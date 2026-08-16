@@ -23,11 +23,23 @@ create index if not exists wishes_owner_active_idx on public.wishes (owner_id, e
 revoke insert, update, delete on table public.wishes from public, anon, authenticated;
 
 create or replace function public.phase5_valid_promotion_url(p_value text)
-returns boolean language sql immutable set search_path = pg_catalog as $$
+returns boolean language sql immutable set search_path = '' as $$
   select p_value is not null and octet_length(p_value) <= 4096
     and p_value !~ '[[:cntrl:]]'
-    and p_value ~ '^https://([A-Za-z0-9-]+\\.)*(taobao\\.com|tmall\\.com|e\\.tb\\.cn)(/|$)';
+    and p_value ~ '^https://([A-Za-z0-9-]+\.)*(taobao\.com|tmall\.com|e\.tb\.cn)(/|$)';
 $$;
+
+-- Validate before casting, and catch conversion overflow explicitly. This keeps
+-- later decision writes from re-casting an untrusted price snapshot.
+create or replace function public.phase5_amount_or_null(p_value text)
+returns numeric(12,2) language plpgsql immutable set search_path = '' as $$
+declare v_amount numeric(12,2);
+begin
+  if p_value is null or p_value !~ '^(0|[1-9][0-9]{0,9})(\.[0-9]{1,2})?$' then return null; end if;
+  begin v_amount := p_value::numeric(12,2); exception when numeric_value_out_of_range or invalid_text_representation then return null; end;
+  if v_amount < 0 then return null; end if;
+  return v_amount;
+end; $$;
 
 -- Keep the existing Stage 1 ownership policy explicit after the lifecycle change.
 alter policy "wishes_update_own" on public.wishes
@@ -37,7 +49,7 @@ alter policy "wishes_update_own" on public.wishes
 create or replace function public.create_custody_wish(
   p_product jsonb, p_evidence jsonb, p_custody_hours smallint, p_idempotency_key uuid
 ) returns public.wishes
-language plpgsql security definer set search_path = public, pg_temp as $$
+language plpgsql security definer set search_path = '' as $$
 declare v_owner uuid := auth.uid(); v_existing public.wishes; v_active integer;
 begin
   if v_owner is null then raise exception 'authentication_required'; end if;
@@ -47,8 +59,8 @@ begin
     or nullif(trim(p_product->>'itemId'), '') is null or nullif(trim(p_product->>'title'), '') is null
     or octet_length(p_product::text) > 16384 or octet_length(p_evidence::text) > 65536
     or not public.phase5_valid_promotion_url(p_product->>'promotionUrl')
-    or not ((p_product->>'sellingPrice') ~ '^[0-9]+(\\.[0-9]{1,2})?$')
-    or (p_product ? 'estimatedPrice' and p_product->'estimatedPrice' <> 'null'::jsonb and not ((p_product->>'estimatedPrice') ~ '^[0-9]+(\\.[0-9]{1,2})?$')) then raise exception 'invalid_product'; end if;
+    or public.phase5_amount_or_null(p_product->>'sellingPrice') is null
+    or (p_product ? 'estimatedPrice' and p_product->'estimatedPrice' <> 'null'::jsonb and public.phase5_amount_or_null(p_product->>'estimatedPrice') is null) then raise exception 'invalid_product'; end if;
   perform pg_advisory_xact_lock(hashtextextended(v_owner::text, 0));
   select * into v_existing from public.wishes where owner_id=v_owner and idempotency_key=p_idempotency_key;
   if found then return v_existing; end if;
@@ -62,7 +74,7 @@ end; $$;
 
 create or replace function public.list_my_custody_wishes(p_offset integer default 0, p_limit integer default 20)
 returns jsonb
-language plpgsql security definer set search_path = public, pg_temp as $$
+language plpgsql security definer set search_path = '' as $$
 declare v_owner uuid := auth.uid(); v_total integer; v_items jsonb; v_summary jsonb; v_page_limit integer := least(greatest(p_limit,1),20); v_offset integer := greatest(p_offset,0);
 begin
   if v_owner is null then raise exception 'authentication_required'; end if;
@@ -75,7 +87,7 @@ end; $$;
 
 create or replace function public.decide_custody_wish(p_wish_id uuid, p_decision text)
 returns public.wishes
-language plpgsql security definer set search_path = public, pg_temp as $$
+language plpgsql security definer set search_path = '' as $$
 declare v_owner uuid := auth.uid(); v_wish public.wishes;
 begin
   if v_owner is null then raise exception 'authentication_required'; end if;
@@ -87,17 +99,17 @@ begin
   if v_wish.status in ('purchased_intent','abandoned') then return v_wish; end if;
   if v_wish.status <> 'expired' then raise exception 'wish_not_expired'; end if;
   update public.wishes set status=case when p_decision='purchase' then 'purchased_intent' else 'abandoned' end,
-    decision_at=now(), counted_amount=case when p_decision='abandon' then coalesce(nullif(product->>'estimatedPrice','')::numeric, nullif(product->>'sellingPrice','')::numeric) else 0 end,
+    decision_at=now(), counted_amount=case when p_decision='abandon' then coalesce(public.phase5_amount_or_null(product->>'estimatedPrice'), public.phase5_amount_or_null(product->>'sellingPrice'), 0::numeric(12,2)) else 0::numeric(12,2) end,
     last_seen_at=now(), updated_at=now()
   where id=p_wish_id and owner_id=v_owner returning * into v_wish;
   return v_wish;
 end; $$;
 
 create or replace function public.delete_my_custody_wish(p_wish_id uuid) returns boolean
-language plpgsql security definer set search_path = public, pg_temp as $$
+language plpgsql security definer set search_path = '' as $$
 begin if auth.uid() is null then raise exception 'authentication_required'; end if; delete from public.wishes where id=p_wish_id and owner_id=auth.uid(); return found; end; $$;
 create or replace function public.clear_my_custody_wishes() returns integer
-language plpgsql security definer set search_path = public, pg_temp as $$
+language plpgsql security definer set search_path = '' as $$
 declare n integer; begin if auth.uid() is null then raise exception 'authentication_required'; end if; delete from public.wishes where owner_id=auth.uid() and status in ('purchased_intent','abandoned'); get diagnostics n = row_count; return n; end; $$;
 
 revoke all on function public.create_custody_wish(jsonb,jsonb,smallint,uuid) from public, anon;
@@ -106,6 +118,7 @@ revoke all on function public.decide_custody_wish(uuid,text) from public, anon;
 revoke all on function public.delete_my_custody_wish(uuid) from public, anon;
 revoke all on function public.clear_my_custody_wishes() from public, anon;
 revoke all on function public.phase5_valid_promotion_url(text) from public, anon, authenticated;
+revoke all on function public.phase5_amount_or_null(text) from public, anon, authenticated;
 grant execute on function public.create_custody_wish(jsonb,jsonb,smallint,uuid), public.list_my_custody_wishes(integer,integer), public.decide_custody_wish(uuid,text), public.delete_my_custody_wish(uuid), public.clear_my_custody_wishes() to authenticated;
 
 -- SQL-level deployment acceptance: two ordinary users must be unable to read,
@@ -113,6 +126,13 @@ grant execute on function public.create_custody_wish(jsonb,jsonb,smallint,uuid),
 -- be denied; same-key concurrent creates return one row; concurrent decisions
 -- preserve the first result; pre-expiry decisions, invalid prices, invalid URLs
 -- and oversized payloads reject; page two must preserve full summary totals.
+-- Promotion URL vectors: https://s.click.taobao.com/x, https://detail.tmall.com/x
+-- and https://e.tb.cn/x pass; https://eviltaobao.com/x,
+-- https://taobao.com.evil.example/x, http://s.click.taobao.com/x,
+-- https://user@s.click.taobao.com/x and any control character reject.
+-- Amount vectors: sellingPrice and estimatedPrice must convert to numeric(12,2),
+-- be non-negative, and stay within the numeric(12,2) range; decision writes use
+-- the validated helper and therefore cannot overflow through a second raw cast.
 -- Independent deployment only: enable pg_cron after reviewing anonymous
 -- detection against current Auth docs. The cleanup job must call a restricted
 -- service function that identifies auth.jwt()->>'is_anonymous' safely and deletes

@@ -98,7 +98,7 @@ Demo 不替用户判断“该不该买”，也不以高佣商品诱导购买。
 | 阶段 2：静态产品流程 | 已完成 | 验收证据见 `PHASE2_ACCEPTANCE.md`；冻结代码基线为 `4c29383`；仅本地 fixture、状态机与浏览器结构验收，不调用外部业务接口、不部署 |
 | 阶段 3：淘联真实商品搜索 | 已完成 | 验收证据见 `PHASE3_ACCEPTANCE.md`；冻结代码基线为 `8908331`；远程函数、真实接口与本地真实模式浏览器候选选择均已通过 |
 | 阶段 4：知乎双层内容 | 已完成 | 证据见 `PHASE4_ACCEPTANCE.md`；冻结代码基线为 `07b6a4d`；远程函数、三类商品真实双层接口与本地真实模式浏览器流程均已通过 |
-| 阶段 5：愿望保管、服务端持久化与跨浏览器身份 | 本地返工完成，远程验收待进行 | 代码、SQL 设计稿和本地开发测试见 `PHASE5_ACCEPTANCE.md`；未修改远程 Supabase、未创建正式 migration、未启用 Cron |
+| 阶段 5：愿望保管、服务端持久化与跨浏览器身份 | 本地返工完成，远程验收待进行 | 已复验服务端恢复设计、本地行为型测试、SQL 设计稿和账户删除边界；详见 `PHASE5_ACCEPTANCE.md`。未修改远程 Supabase、未创建正式 migration、未启用 Cron |
 | 阶段 6 及后续 | 未开始 | 不得打开淘宝购物卡或进入后续流程 |
 
 ---
@@ -1192,7 +1192,7 @@ Supabase SDK 可以在浏览器保存标准登录会话；`localStorage` 仍不�
 
 退出条件：刷新、返回、重复点击等边界全部通过。
 
-状态：**本地实现完成，等待独立远程验收**。详见 `PHASE5_ACCEPTANCE.md` 与 `PHASE5_DEPLOY_MANIFEST.md`。由于本机没有 Supabase CLI，本轮仅提交 `PHASE5_SCHEMA_DRAFT.sql`，未伪造正式 migration；远程数据库、RLS、Auth、SMTP、Cron、函数、测试数据和 WebView 均未操作。阶段 6 未开始。
+状态：**本地返工完成，等待独立远程验收**。详见 `PHASE5_ACCEPTANCE.md` 与 `PHASE5_DEPLOY_MANIFEST.md`。正式恢复设计改为服务端活动愿望推导，开发 wishTest 仅是本地行为测试；由于本机没有 Supabase CLI，本轮仅提交 `PHASE5_SCHEMA_DRAFT.sql`，未伪造正式 migration；远程数据库、RLS、Auth、SMTP、Cron、函数、测试数据和 WebView 均未操作。阶段 6 未开始。
 
 ### 阶段 6：官方推广链接与购物卡
 

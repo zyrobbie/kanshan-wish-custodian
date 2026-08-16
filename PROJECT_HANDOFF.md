@@ -540,7 +540,7 @@ idle → product_searching → product_selecting
 
 退出条件：至少三类不同商品完成实时双层验证，内容可追溯，部分失败不阻塞保管。
 
-当前记录：远程 `zhihu-search`、三类商品真实专业/体验双层接口、本地异常情景和一条本地真实模式完整浏览器流程均已通过；冻结代码基线为 `07b6a4d`，详见 `PHASE4_ACCEPTANCE.md`。阶段 5 已完成本地返工，仍未做任何远程变更。
+当前记录：远程 `zhihu-search`、三类商品真实专业/体验双层接口、本地异常情景和一条本地真实模式完整浏览器流程均已通过；冻结代码基线为 `07b6a4d`，详见 `PHASE4_ACCEPTANCE.md`。阶段 5 本地返工已复验服务端恢复设计、本地行为型情景、SQL 权限草案与账户删除边界，仍未做任何远程变更。
 
 ### 10.4 阶段 5：愿望保管与完整身份流程
 
@@ -556,7 +556,7 @@ idle → product_searching → product_selecting
 
 退出条件：刷新、返回、重复点击、并发浏览器、迁移、删除和金额边界全部通过。
 
-当前记录：本地 Auth 服务、愿望 RPC 服务、开发测试情景、账户删除函数和 `PHASE5_SCHEMA_DRAFT.sql` 已提交；`PHASE5_ACCEPTANCE.md` 是最新本地验收依据。因 Supabase CLI 缺失，尚未生成或部署正式 migration；远程 RLS、SMTP、跨浏览器、Cron 和 WebView 均等待独立验收。阶段 6 未开始。
+当前记录：本地 Auth 服务、愿望 RPC 服务、服务端恢复逻辑、行为型开发测试情景、账户删除函数和 `PHASE5_SCHEMA_DRAFT.sql` 已提交；`PHASE5_ACCEPTANCE.md` 是最新本地验收依据。因 Supabase CLI 缺失，尚未生成或部署正式 migration；远程 RLS、SMTP、跨浏览器、Cron 和 WebView 均等待独立验收。阶段 6 未开始。
 
 ### 10.5 阶段 6：官方推广链接与购物卡
 

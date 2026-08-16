@@ -15,9 +15,12 @@ Deno.serve(async (request) => {
     const { data: { user } } = await verifier.auth.getUser(token);
     if (!user) return json({ ok: false, error: 'authentication_required' }, 401, origin);
     const admin = createClient(url, service, { auth: { persistSession: false } });
+    // Revoke all refresh sessions first. Access JWTs can remain cryptographically
+    // valid until expiry, so remote acceptance must still verify post-delete RLS.
+    const { error: signOutError } = await admin.auth.admin.signOut(token, 'global');
     const { error } = await admin.auth.admin.deleteUser(user.id);
     if (error) throw error;
-    console.log(JSON.stringify({ event: 'account_deleted', ok: true }));
+    console.log(JSON.stringify({ event: 'account_deleted', ok: true, sessions_revoked: !signOutError }));
     return json({ ok: true }, 200, allowedOrigin);
   } catch (error) { console.log(JSON.stringify({ event: 'account_deleted', ok: false, error: safeError(error) })); return json({ ok: false, error: 'request_failed' }, 500, allowedOrigin); }
 });
