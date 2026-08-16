@@ -7,14 +7,19 @@ import { AsyncTaskGate } from './async-task.js';
 import { Views, openWishFlow } from './navigation.js';
 import { ProductSearchService, normalizeClientQuery, productPriceText, safeClientUrl } from './products-service.js';
 import { ProductTestService, productTestName } from './product-test-scenarios.js';
+import { ZhihuEvidenceService, ZhihuEvidenceError } from './zhihu-service.js';
+import { EvidenceTestService, evidenceTestName } from './evidence-test-scenarios.js';
 
 const isDevelopment = import.meta.env.DEV;
 const root = document.querySelector('#app');
 const fixtureMode = isDevelopment && new URLSearchParams(window.location.search).get('fixture') === '1';
 const productTest = !fixtureMode && isDevelopment ? productTestName(window.location.search) : null;
 const productTestMode = Boolean(productTest);
+const evidenceTest = !fixtureMode && productTest === 'success' && isDevelopment ? evidenceTestName(window.location.search) : null;
+const evidenceTestMode = Boolean(evidenceTest);
 const repository = new FixtureRepository({ mode: fixtureMode ? 'development' : 'production', storage: fixtureMode ? window.sessionStorage : null });
 const productService = fixtureMode ? null : productTestMode ? new ProductTestService(productTest) : new ProductSearchService({ url: import.meta.env.VITE_SUPABASE_URL, publishableKey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY });
+const evidenceService = fixtureMode ? null : evidenceTestMode ? new EvidenceTestService(evidenceTest) : new ZhihuEvidenceService({ url: import.meta.env.VITE_SUPABASE_URL, publishableKey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY });
 let flow = fixtureMode ? repository.getFlow() : { state: States.IDLE };
 let timer = null;
 let view = Views.FLOW;
@@ -22,7 +27,7 @@ const taskGate = new AsyncTaskGate();
 
 const statusNames = { [States.SEALED]: '保管中', [States.EXPIRED]: '已到期待决定', [States.PURCHASE_READY]: '决定购买', [States.ABANDONED]: '已放弃', [States.ARCHIVED]: '已归档' };
 const escape = (value) => String(value).replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
-const modeLabel = () => fixtureMode ? '阶段 3 · 开发测试数据' : productTestMode ? '阶段 3 · 开发测试情景' : '阶段 3 · 淘宝联盟实时候选';
+const modeLabel = () => fixtureMode ? '阶段 4 · 开发测试数据' : productTestMode || evidenceTestMode ? '阶段 4 · 开发测试情景' : '阶段 4 · 商品与知乎证据';
 const productSource = () => fixtureMode ? '开发 fixture（非淘宝实时结果）' : productTestMode ? '开发测试情景（不访问外部接口）' : '淘宝联盟实时候选';
 const productSlot = '<div data-product-summary></div>';
 
@@ -129,35 +134,64 @@ function renderProducts() {
     choose.addEventListener('click', () => {
       const selected = flow.products[Number(choose.dataset.productIndex)];
       if (!selected || !safeClientUrl(selected.promotionUrl)) { flow = { ...flow, error: '该候选缺少有效官方推广链接，不能继续。' }; save(States.ERROR); return; }
-      save(fixtureMode ? States.EVIDENCE_LOADING : States.PRODUCT_SELECTED, { product: selected });
+      save(States.EVIDENCE_LOADING, { product: selected });
     });
     card.append(choose); list.append(card);
   });
 }
 
-function renderProductSelected() { shell(`<section><p class="eyebrow">阶段 3 边界</p><h1>商品已选定；知乎证据将在阶段 4 接入。</h1>${productSlot}<p class="notice">当前仅完成淘宝联盟真实候选选择，不展示 fixture 知乎证据、不启动倒计时，也不打开推广链接。</p><button class="secondary" data-action="products">返回重选商品</button><button class="quiet-button" data-action="home">开始新的搜索</button></section>`); mountProductSummary(flow.product); }
+function renderProductSelected() { renderEvidenceLoading(); }
 function renderProductEmpty() { const label = fixtureMode ? '开发测试数据' : productTestMode ? `开发测试情景 · ${productTest}` : '淘宝联盟实时候选'; shell(`<section class="center-state"><p class="eyebrow">${label}</p><h1>暂未找到可展示的候选</h1><p>本次返回结果为空，或全部因字段不完整被过滤；没有自动补充候选。</p><button class="primary" data-action="home">换一个关键词</button></section>`); }
 
 function renderEvidenceLoading() {
   const task = taskGate.begin();
   const evidenceMode = flow.evidenceMode;
-  shell(`<section class="center-state"><span class="loader" aria-hidden="true"></span><p class="eyebrow">开发测试数据</p><h1>正在整理克制消费证据</h1><p>不会请求知乎或任何外部内容。</p></section>`);
+  const label = fixtureMode ? '开发测试数据' : evidenceTestMode ? `开发测试情景 · ${evidenceTest}` : '知乎双层内容';
+  const description = fixtureMode ? '不会请求知乎或任何外部内容。' : evidenceTestMode ? '不会请求 Supabase、淘宝或知乎。' : '正在从知乎整理专业解读与真实体验。';
+  shell(`<section class="center-state"><span class="loader" aria-hidden="true"></span><p class="eyebrow">${label}</p><h1>正在从知乎整理专业解读与真实体验</h1><p>${description}</p></section>`);
   setTimeout(async () => {
     try {
-      const evidence = await repository.evidence(evidenceMode);
+      const fixtureEvidence = fixtureMode ? await repository.evidence(evidenceMode) : null;
+      const fixtureLayer = (layer, items) => ({ status: items.length ? 'ready' : 'empty', items: items.map((item, index) => ({ layer, id: `fixture-${layer}-${index}`, title: item.title, authorName: '开发测试样例', authorBadgeText: null, contentType: '开发样例', summary: item.summary, url: `https://www.zhihu.com/question/fixture-${layer}-${index}`, voteUpCount: null, authorityLevel: null, editTime: null })) });
+      const evidence = fixtureMode ? { coreProductName: flow.product?.title ?? '', layers: { expert: fixtureLayer('expert', fixtureEvidence.expert), experience: fixtureLayer('experience', fixtureEvidence.experience) } } : await evidenceService.load(flow.product?.title);
       if (!taskIsCurrent(task, States.EVIDENCE_LOADING)) return;
-      const state = evidence.expert.length && evidence.experience.length ? States.EVIDENCE_READY : States.EVIDENCE_PARTIAL;
+      const state = evidence.layers.expert.status === 'ready' && evidence.layers.experience.status === 'ready' ? States.EVIDENCE_READY : States.EVIDENCE_PARTIAL;
       save(state, { evidence });
     } catch (error) {
       if (!taskIsCurrent(task, States.EVIDENCE_LOADING)) return;
-      flow = { ...flow, error: error.message };
+      flow = { ...flow, failedStage: 'evidence', error: error instanceof Error ? error.message : '知乎证据服务请求失败，请稍后重试。' };
       save(States.ERROR);
     }
   }, 350);
 }
 
-function evidenceBlock(title, records, empty) { return `<section class="evidence"><h2>${title}</h2>${records.length ? records.map((item) => `<article><span class="source">${escape(item.source)}</span><h3>${escape(item.title)}</h3><p>${escape(item.summary)}</p></article>`).join('') : `<p class="empty">${empty}</p>`}</section>`; }
-function renderEvidence() { const { evidence } = flow; shell(`<section><p class="eyebrow">开发测试数据 · 克制消费证据</p><h1>给决定多一点时间</h1>${productSlot}${evidenceBlock('专业 / 专家类提醒', evidence.expert, '本次未找到专业类证据。')}${evidenceBlock('真实经验类提醒', evidence.experience, '本次未找到经验类证据。')}<p class="notice">这些均是本地开发样例，不是知乎真实搜索结果。证据不足仍可继续保管，但不替你作决定。</p><div class="decision-row"><button class="primary" data-action="custody">继续设置保管时间</button><button class="secondary" data-action="products">返回重选商品</button></div></section>`); mountProductSummary(flow.product); }
+function appendEvidenceSection(target, label, layer) {
+  const section = document.createElement('section'); section.className = 'evidence';
+  const heading = document.createElement('h2'); heading.textContent = label; section.append(heading);
+  if (layer.status === 'error') { const notice = document.createElement('p'); notice.className = 'empty'; notice.textContent = '该层暂时加载失败，未将失败当作无结果。'; section.append(notice); target.append(section); return; }
+  if (!layer.items.length) { const empty = document.createElement('p'); empty.className = 'empty'; empty.textContent = '该层暂未找到足够相关内容。'; section.append(empty); target.append(section); return; }
+  layer.items.forEach((item) => {
+    const card = document.createElement('article');
+    const source = document.createElement('span'); source.className = 'source'; source.textContent = '来源：知乎';
+    const title = document.createElement('h3'); title.textContent = item.title;
+    const meta = document.createElement('p'); meta.textContent = `${item.authorName}${item.authorBadgeText ? ` · ${item.authorBadgeText}` : ''} · ${item.contentType}`;
+    const summary = document.createElement('p'); summary.textContent = item.summary;
+    const link = document.createElement('a'); link.className = 'evidence-link'; link.textContent = '查看知乎原文'; link.target = '_blank'; link.rel = 'noopener noreferrer'; link.href = item.url;
+    card.append(source, title, meta, summary, link); section.append(card);
+  });
+  target.append(section);
+}
+function renderEvidence() {
+  const { evidence } = flow;
+  const label = fixtureMode ? '开发测试数据 · 知乎证据样例' : evidenceTestMode ? `开发测试情景 · ${evidenceTest}` : '知乎双层内容';
+  const article = `<section><p class="eyebrow">${label}</p><h1>给决定多一点可追溯的参考</h1>${productSlot}<div id="evidence-layers"></div><p id="evidence-notice" class="notice"></p><div class="decision-row"><button class="secondary" data-action="products">返回重选商品</button><button class="quiet-button" data-action="home">开始新的搜索</button></div></section>`;
+  shell(article); mountProductSummary(flow.product);
+  const target = root.querySelector('#evidence-layers');
+  appendEvidenceSection(target, '专业解读', evidence.layers.expert);
+  appendEvidenceSection(target, '真实体验', evidence.layers.experience);
+  const bothEmpty = evidence.layers.expert.status === 'empty' && evidence.layers.experience.status === 'empty';
+  root.querySelector('#evidence-notice').textContent = bothEmpty ? '本次未找到足够相关的知乎资料。资料不足不会替用户作决定；继续保管将在阶段 5 接入。' : '搜索摘要不是完整原文；请自行查看来源。资料不足不会替用户作决定；愿望保管将在阶段 5 接入。';
+}
 
 function renderCustody() { shell(`<section><p class="eyebrow">开发演示时间</p><h1>这次想保管多久？</h1>${productSlot}<p>正式产品计划对应 24 / 48 / 72 小时；本阶段分别压缩为 24 / 48 / 72 秒。</p><div class="duration-list">${DemoDurations.map((seconds) => `<button class="duration" data-duration="${seconds}"><b>${seconds} 秒</b><span>对应 ${seconds} 小时</span></button>`).join('')}</div><p class="notice">封存后以绝对到期时间计算；刷新、页面恢复或后台返回时都会重新计算。</p></section>`); mountProductSummary(flow.product); root.querySelectorAll('[data-duration]').forEach((button) => button.addEventListener('click', () => { const record = repository.seal({ product: flow.product, duration: Number(button.dataset.duration), evidence: flow.evidence }); flow = repository.getFlow(); flow.recordId = record.id; render(); })); }
 
@@ -167,8 +201,8 @@ function renderExpired(record) { shell(`<section><p class="eyebrow">保管时间
 function renderPurchase(record) { shell(`<section><p class="eyebrow">决定购买 · 开发测试占位</p><h1>保留给淘宝页面的最后确认</h1>${productSlot}<p>具体价格及优惠以淘宝结算页面为准。阶段 2 不打开真实推广链接，也不代表订单已完成。</p><a class="primary fake-link" href="#fixture-purchase" id="fixture-purchase">开发测试：模拟打开淘宝</a><p id="purchase-message" class="notice"></p><button class="secondary" data-action="wishes">查看我的愿望</button></section>`); mountProductSummary(record.product); root.querySelector('#fixture-purchase').addEventListener('click', () => { root.querySelector('#purchase-message').textContent = '开发测试占位已触发；不产生外跳或订单。'; }); }
 function renderAbandoned(record) { const total = abandonedTotal(repository.list()); shell(`<section><p class="eyebrow">已放弃 · 计划支出记录</p><h1>这次先不买，也是一种决定。</h1>${productSlot}<p class="metric">本次避免的计划支出：${displayPrice(plannedSpend(record))}</p><p>当前开发测试记录累计：${displayPrice(total)}。这不是实际到账收益。</p><button class="secondary" data-action="wishes">查看我的愿望</button></section>`); mountProductSummary(record.product); }
 function renderWishes() { if (!fixtureMode) { shell(`<section><p class="eyebrow">阶段 3 边界</p><h1>愿望正式持久化将在阶段 5 接入。</h1><p>当前真实商品搜索不会创建本地 fixture 愿望记录。</p><button class="primary" data-action="home">返回商品搜索</button></section>`); return; } shell(`<section><p class="eyebrow">开发测试记录</p><h1>我的愿望</h1><p>这是独立页面视图，不会修改当前愿望的生命周期。正式持久化仍由阶段 1 Supabase 链路承担。</p><button class="secondary" id="seed-history">载入五种状态样例</button><div class="filter-row"><label>筛选状态 <select id="wish-filter"><option value="all">全部</option>${Object.entries(statusNames).map(([status, name]) => `<option value="${status}">${name}</option>`).join('')}</select></label></div><div id="wish-list"></div><button class="quiet-button" data-action="home">开始新的开发测试流程</button></section>`); const list = root.querySelector('#wish-list'); const paint = () => { const selected = root.querySelector('#wish-filter').value; const rows = repository.list().filter((wish) => selected === 'all' || wish.status === selected); list.innerHTML = rows.length ? rows.map((wish) => `<article class="wish-row"><span class="status">${statusNames[wish.status] ?? wish.status}</span><strong>${escape(wish.product.title)}</strong><span>${displayPrice(wish.priceSnapshot.estimatedPrice)}</span>${wish.status === States.SEALED ? `<button class="secondary" data-open-wish="${wish.id}">恢复保管</button>` : ''}</article>`).join('') : '<p class="empty">暂无符合筛选条件的开发测试愿望。</p>'; list.querySelectorAll('[data-open-wish]').forEach((button) => button.addEventListener('click', () => { invalidateTasks(); const record = repository.syncExpiry(button.dataset.openWish); if (!record) return; flow = openWishFlow(record); repository.saveFlow(flow); view = Views.FLOW; render(); })); }; root.querySelector('#seed-history').addEventListener('click', () => { repository.seedHistory(); paint(); }); root.querySelector('#wish-filter').addEventListener('change', paint); paint(); }
-function renderError() { const label = fixtureMode ? '开发测试错误状态' : productTestMode ? `开发测试情景 · ${productTest}` : '商品搜索未完成'; shell(`<section class="error-state"><p class="eyebrow">${label}</p><h1>这一步不能继续</h1><p>${escape(flow.error ?? '发生了未分类错误。')}</p><button class="primary" data-action="home">返回首页</button></section>`); }
+function renderError() { const label = fixtureMode ? '开发测试错误状态' : productTestMode || evidenceTestMode ? `开发测试情景 · ${evidenceTest ?? productTest}` : flow.failedStage === 'evidence' ? '知乎证据未完成' : '商品搜索未完成'; shell(`<section class="error-state"><p class="eyebrow">${label}</p><h1>这一步不能继续</h1><p>${escape(flow.error ?? '发生了未分类错误。')}</p><button class="primary" data-action="home">返回首页</button></section>`); }
 
-function handleAction(event) { event.preventDefault(); const action = event.currentTarget.dataset.action; if (action === 'home') { invalidateTasks(); view = Views.FLOW; if (fixtureMode) repository.clearFlow(); flow = fixtureMode ? repository.getFlow() : { state: States.IDLE }; render(); } if (action === 'wishes') { invalidateTasks(); view = Views.WISHES; render(); } if (action === 'products') { view = Views.FLOW; save(States.PRODUCT_SELECTING); } if (action === 'custody') { view = Views.FLOW; save(States.CUSTODY_CONFIG); } }
+function handleAction(event) { event.preventDefault(); const action = event.currentTarget.dataset.action; if (action === 'home') { invalidateTasks(); view = Views.FLOW; if (fixtureMode) repository.clearFlow(); flow = fixtureMode ? repository.getFlow() : { state: States.IDLE }; render(); } if (action === 'wishes') { invalidateTasks(); view = Views.WISHES; render(); } if (action === 'products') { invalidateTasks(); view = Views.FLOW; save(States.PRODUCT_SELECTING); } if (action === 'custody') { view = Views.FLOW; save(States.CUSTODY_CONFIG); } }
 function recover() { if (!isDevelopment || !flow.recordId) return; const record = repository.syncExpiry(flow.recordId); if (record?.status === States.EXPIRED && flow.state === States.SEALED) { flow = repository.getFlow(); render(); } else if (flow.state === States.SEALED) render(); }
 document.addEventListener('visibilitychange', () => { if (!document.hidden) recover(); }); window.addEventListener('pageshow', recover); render();

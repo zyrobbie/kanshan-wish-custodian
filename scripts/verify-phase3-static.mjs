@@ -11,7 +11,7 @@ const required = [
   ['src/app/products-service.js', 'extractProductErrorCode'],
   ['src/app/products-service.js', 'safeClientUrl'],
   ['src/app/product-test-scenarios.js', 'ProductTestService'],
-  ['src/app/main.js', '商品已选定；知乎证据将在阶段 4 接入。'],
+  ['src/app/main.js', 'States.EVIDENCE_LOADING'],
   ['src/app/main.js', "get('fixture') === '1'"],
   ['src/app/main.js', 'productTestMode'],
   ['PHASE3_DEPLOY_MANIFEST.md', 'verify_jwt=true'],
