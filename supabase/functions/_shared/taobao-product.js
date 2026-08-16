@@ -13,11 +13,12 @@ export function finiteMoney(value) {
 }
 
 export function officialPromotionUrl(value) {
-  if (typeof value !== 'string' || !value.trim()) return null;
-  const normalized = value.trim().startsWith('//') ? `https:${value.trim()}` : value.trim();
+  if (typeof value !== 'string' || !value.trim() || controlCharacters.test(value)) return null;
+  const trimmed = value.trim();
+  const normalized = trimmed.startsWith('//') ? `https:${trimmed}` : trimmed;
   try {
     const parsed = new URL(normalized);
-    return parsed.protocol === 'https:' || parsed.protocol === 'http:' ? normalized : null;
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:' ? parsed.href : null;
   } catch { return null; }
 }
 

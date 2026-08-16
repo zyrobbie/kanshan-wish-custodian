@@ -13,6 +13,8 @@ export const productErrorMessages = Object.freeze({
   invalid_response: '商品服务返回的数据不完整，未展示候选。',
 });
 
+export const productErrorCodes = Object.freeze(new Set(Object.keys(productErrorMessages)));
+
 export class ProductSearchError extends Error {
   constructor(code) { super(productErrorMessages[code] ?? productErrorMessages.request_failed); this.code = code; }
 }
@@ -23,8 +25,45 @@ export function normalizeClientQuery(value) {
   return normalized.length >= 2 && normalized.length <= 80 ? normalized : null;
 }
 
+export function safeClientUrl(value) {
+  if (typeof value !== 'string' || !value.trim() || /[\u0000-\u001F\u007F]/.test(value)) return null;
+  try {
+    const parsed = new URL(value.trim());
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:' ? parsed.href : null;
+  } catch { return null; }
+}
+
+export function productPriceText(product) {
+  const price = Number.isFinite(product?.price) ? product.price : null;
+  const finalPrice = Number.isFinite(product?.finalPrice) ? product.finalPrice : null;
+  if (price === null) return null;
+  return product?.priceLabel === '预估到手价' && finalPrice !== null && finalPrice !== price
+    ? { sales: price, estimated: finalPrice }
+    : { sales: price, estimated: null };
+}
+
+const stableCode = (value) => typeof value === 'string' && productErrorCodes.has(value) ? value : null;
+
+async function contextBody(context) {
+  if (!context) return null;
+  if (typeof context === 'string') {
+    try { return JSON.parse(context); } catch { return null; }
+  }
+  if (typeof context === 'object' && typeof context.json === 'function') {
+    try { return await context.json(); } catch { return null; }
+  }
+  return context && typeof context === 'object' ? context : null;
+}
+
+export async function extractProductErrorCode({ data, error } = {}) {
+  const direct = stableCode(data?.error);
+  if (direct) return direct;
+  const body = await contextBody(error?.context);
+  return stableCode(body?.error) ?? 'request_failed';
+}
+
 export function isProductCard(value) {
-  return Boolean(value && value.provider === 'taobao' && typeof value.itemId === 'string' && value.itemId && typeof value.title === 'string' && value.title && Number.isFinite(value.price) && value.price >= 0 && Number.isFinite(value.finalPrice) && value.finalPrice >= 0 && (value.priceLabel === '销售价' || value.priceLabel === '预估到手价') && typeof value.promotionUrl === 'string' && /^https?:\/\//.test(value.promotionUrl));
+  return Boolean(value && value.provider === 'taobao' && typeof value.itemId === 'string' && value.itemId && typeof value.title === 'string' && value.title && Number.isFinite(value.price) && value.price >= 0 && Number.isFinite(value.finalPrice) && value.finalPrice >= 0 && (value.priceLabel === '销售价' || value.priceLabel === '预估到手价') && safeClientUrl(value.promotionUrl));
 }
 
 export class ProductSearchService {
@@ -41,8 +80,7 @@ export class ProductSearchService {
     const session = userData.user ? { data: { user: userData.user }, error: null } : await this.client.auth.signInAnonymously();
     if (session.error || !session.data?.user) throw new ProductSearchError('authentication_required');
     const { data, error } = await this.client.functions.invoke('products-search', { body: { query: normalized } });
-    const code = typeof data?.error === 'string' ? data.error : null;
-    if (error || !data?.ok) throw new ProductSearchError(code && productErrorMessages[code] ? code : 'request_failed');
+    if (error || !data?.ok) throw new ProductSearchError(await extractProductErrorCode({ data, error }));
     if (!Array.isArray(data.products)) throw new ProductSearchError('invalid_response');
     return { query: normalized, products: data.products.filter(isProductCard) };
   }
