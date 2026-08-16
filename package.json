@@ -13,8 +13,9 @@
     "check:phase2": "node scripts/verify-phase2-static.mjs",
     "check:phase3": "node scripts/verify-phase3-static.mjs",
     "check:phase4": "node scripts/verify-phase4-static.mjs",
+    "check:phase5": "node scripts/verify-phase5-static.mjs",
     "check:dist-secrets": "node scripts/scan-dist-secrets.mjs",
-    "check": "npm run check:secrets && npm test && npm run check:phase1 && npm run check:phase2 && npm run check:phase3 && npm run check:phase4 && npm run build && npm run check:dist-secrets"
+    "check": "npm run check:secrets && npm test && npm run check:phase1 && npm run check:phase2 && npm run check:phase3 && npm run check:phase4 && npm run check:phase5 && npm run build && npm run check:dist-secrets"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4"

@@ -1,0 +1,14 @@
+import { readFileSync } from 'node:fs';
+const files = ['src/app/auth-service.js','src/app/wishes-service.js','src/app/wish-domain.js','src/app/wish-test-scenarios.js','PHASE5_SCHEMA_DRAFT.sql','PHASE5_DEPLOY_MANIFEST.md','supabase/functions/delete-my-account/index.ts'];
+const source = Object.fromEntries(files.map((file) => [file, readFileSync(file, 'utf8')]));
+const requireText = (file, text) => { if (!source[file].includes(text)) throw new Error(`${file} missing ${text}`); };
+requireText('src/app/auth-service.js', 'signInAnonymously');
+requireText('src/app/auth-service.js', 'shouldCreateUser: false');
+requireText('src/app/wishes-service.js', 'create_custody_wish');
+requireText('PHASE5_SCHEMA_DRAFT.sql', 'pg_advisory_xact_lock');
+requireText('PHASE5_SCHEMA_DRAFT.sql', 'with check');
+requireText('PHASE5_SCHEMA_DRAFT.sql', 'p_decision not in');
+requireText('PHASE5_DEPLOY_MANIFEST.md', 'verify_jwt=true');
+if (source['src/app/wish-test-scenarios.js'].includes('localStorage')) throw new Error('wish test scenarios must not store wish data locally');
+if (!/import\.meta\.env\.DEV/.test(readFileSync('src/app/main.js','utf8'))) throw new Error('wish test gate must be DEV-only');
+console.log('phase5 static checks passed: 8');

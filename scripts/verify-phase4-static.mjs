@@ -10,7 +10,7 @@ const required = [
   ['src/app/zhihu-service.js', "functions.invoke('zhihu-search'"],
   ['src/app/evidence-test-scenarios.js', 'EvidenceTestService'],
   ['src/app/main.js', '正在从知乎整理专业解读与真实体验'],
-  ['src/app/main.js', '愿望保管将在阶段 5 接入'],
+  ['src/app/main.js', '交给看山保管'],
   ['PHASE4_DEPLOY_MANIFEST.md', 'verify_jwt=true'],
 ];
 for (const [file, needle] of required) {
