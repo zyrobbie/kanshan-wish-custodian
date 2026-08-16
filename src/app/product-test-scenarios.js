@@ -28,6 +28,7 @@ export class ProductTestService {
     if (!normalized) throw new ProductSearchError('invalid_query');
     switch (this.name) {
       case 'success': return { query: normalized, products: [{ ...baseProduct, query: normalized }] };
+      case 'wish-success': return { query: normalized, products: [{ ...baseProduct, query: normalized, promotionUrl: 'https://s.click.taobao.com/local-wish-test' }] };
       case 'empty': return { query: normalized, products: [] };
       case 'timeout': throw new ProductSearchError('provider_timeout');
       case 'permission': throw new ProductSearchError('provider_permission_denied');

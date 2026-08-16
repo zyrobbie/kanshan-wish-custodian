@@ -6,9 +6,9 @@
 
 1. 独立部署方先运行 `supabase migration new phase5_wish_lifecycle`。
 2. 审查后将 `PHASE5_SCHEMA_DRAFT.sql` 迁入 CLI 新生成的 migration 文件；不要直接把设计稿当成迁移历史。
-3. 部署前核对 public Data API 暴露与 `authenticated` 权限；所有业务表必须保持 RLS 强制启用。
+3. 部署前核对 public Data API 暴露与 `authenticated` 权限；所有业务表必须保持 RLS 强制启用。`wishes` 只保留受 RLS 约束的读取，直接 INSERT/UPDATE/DELETE 必须撤销。
 4. 审查并执行 RPC：`create_custody_wish`、`list_my_custody_wishes`、`decide_custody_wish`、`delete_my_custody_wish`、`clear_my_custody_wishes`。
-5. 对普通用户 A/B 会话验收 RLS：越权读取、更新、删除均应为零记录；UPDATE 同时检验 `USING` 与 `WITH CHECK`。
+5. 对普通用户 A/B 会话验收 RLS：越权读取、更新、删除均应为零记录；直接写入应被拒绝；第 2 页应有正确 `nextOffset` 且统计覆盖完整集合。
 
 ## Edge Functions
 
@@ -17,7 +17,7 @@
 | `delete-my-account` | `supabase/functions/delete-my-account/index.ts` | 入口、`supabase/functions/_shared/http.ts` | `true` |
 | `migrate-anonymous-wishes` | `supabase/functions/migrate-anonymous-wishes/index.ts` | 入口、`supabase/functions/_shared/http.ts` | `true` |
 
-部署时复用项目既有 Supabase 默认运行时变量与既有自定义 CORS 配置；不得在命令、日志、报告或源码中写入任何值。删除账户函数需要受控服务端权限，只允许由当前 JWT 所属用户请求删除自身账户。
+部署时复用项目既有 Supabase 默认运行时变量与既有自定义 CORS 配置；不得在命令、日志、报告或源码中写入任何值。删除账户函数需要受控服务端权限，只允许由当前 JWT 所属用户请求删除自身账户。删除 Auth 用户不等同于立即让既有 JWT 失效；客户端成功后必须执行本地 sign-out。
 
 ## Auth、邮件与迁移验收
 

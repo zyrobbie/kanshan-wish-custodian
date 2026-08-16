@@ -1,8 +1,8 @@
 import { DevelopmentWishStore, WishDomainError } from './wish-domain.js';
 
-const product = { itemId: 'dev-item', title: '阶段 5 开发测试商品', price: 39.8, finalPrice: 29.8, promotionUrl: 'https://example.test/promotion' };
+const product = { itemId: 'dev-item', title: '阶段 5 开发测试商品', price: 39.8, finalPrice: 29.8, promotionUrl: 'https://s.click.taobao.com/dev-promotion' };
 const evidence = { expert: [], experience: [] };
-export const wishTestNames = Object.freeze(['anonymous','sealed','expired','purchase','abandon','limit','duplicate-create','decision-race','pagination','bind-email','existing-email-login','migration','migration-error','otp-error','otp-expired','otp-rate-limited','delete-wish','clear-wishes','account-delete']);
+export const wishTestNames = Object.freeze(['anonymous','sealed','expired','purchase','abandon','limit','duplicate-create','decision-race','pagination','bind-email','existing-email-login','migration','migration-error','otp-error','otp-expired','otp-rate-limited','delete-wish','clear-wishes','account-delete','refresh-restore']);
 
 export function buildWishScenario(name, now = Date.now()) {
   if (!wishTestNames.includes(name)) return null;
@@ -15,7 +15,7 @@ export function buildWishScenario(name, now = Date.now()) {
   if (name === 'purchase' || name === 'decision-race') store.decide(wish.id, 'purchase');
   if (name === 'abandon') store.decide(wish.id, 'abandon');
   if (name === 'delete-wish') store.delete(wish.id);
-  if (name === 'clear-wishes') store.clear();
+  if (name === 'clear-wishes') store.clearCompleted();
   const messages = { 'bind-email': '阶段 5 开发测试情景：邮箱绑定后归属保持不变。', 'existing-email-login': '阶段 5 开发测试情景：已有保管箱 OTP 登录。', migration: '阶段 5 开发测试情景：匿名愿望已安全迁入。', 'migration-error': '阶段 5 开发测试情景：迁移失败，源愿望保持不变。', 'otp-error': '阶段 5 开发测试情景：验证码错误。', 'otp-expired': '阶段 5 开发测试情景：验证码已过期。', 'otp-rate-limited': '阶段 5 开发测试情景：验证码请求过于频繁。', 'account-delete': '阶段 5 开发测试情景：删除账户需要远程受控函数。' };
-  return { store, wishId: wish.id, name, message: messages[name] ?? '阶段 5 开发测试情景：匿名保管箱已就绪。' };
+  return { store, wishId: wish.id, name, refreshExpiresAt: name === 'refresh-restore' ? wish.expiresAt : null, message: messages[name] ?? '阶段 5 开发测试情景：匿名保管箱已就绪。' };
 }

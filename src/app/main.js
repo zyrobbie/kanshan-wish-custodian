@@ -23,10 +23,20 @@ const evidenceTest = !fixtureMode && productTest === 'success' && isDevelopment 
 const evidenceTestMode = Boolean(evidenceTest);
 const wishTest = !fixtureMode && isDevelopment ? new URLSearchParams(window.location.search).get('wishTest') : null;
 const wishTestMode = Boolean(wishTest && wishTestNames.includes(wishTest));
-const wishScenario = wishTestMode ? buildWishScenario(wishTest) : null;
+// Only development wish tests retain their deterministic clock across a reload.
+// Production restoration remains server-authoritative through the stored expiresAt.
+const wishScenario = (() => {
+  if (!wishTestMode) return null;
+  const seedKey = `kanshan:phase5:wish-test-seed:${wishTest}`;
+  const savedSeed = Number(window.sessionStorage.getItem(seedKey));
+  const seed = Number.isFinite(savedSeed) && savedSeed > 0 ? savedSeed : Date.now();
+  window.sessionStorage.setItem(seedKey, String(seed));
+  return buildWishScenario(wishTest, seed);
+})();
 const repository = new FixtureRepository({ mode: fixtureMode ? 'development' : 'production', storage: fixtureMode ? window.sessionStorage : null });
-const productService = fixtureMode ? null : productTestMode ? new ProductTestService(productTest) : new ProductSearchService({ url: import.meta.env.VITE_SUPABASE_URL, publishableKey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY });
-const evidenceService = fixtureMode ? null : evidenceTestMode ? new EvidenceTestService(evidenceTest) : new ZhihuEvidenceService({ url: import.meta.env.VITE_SUPABASE_URL, publishableKey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY });
+const localWishFlow = wishTestMode && !productTestMode;
+const productService = fixtureMode ? null : productTestMode ? new ProductTestService(productTest) : localWishFlow ? new ProductTestService('wish-success') : new ProductSearchService({ url: import.meta.env.VITE_SUPABASE_URL, publishableKey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY });
+const evidenceService = fixtureMode ? null : evidenceTestMode ? new EvidenceTestService(evidenceTest) : localWishFlow ? new EvidenceTestService('both') : new ZhihuEvidenceService({ url: import.meta.env.VITE_SUPABASE_URL, publishableKey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY });
 const authService = fixtureMode || productTestMode ? null : new AuthService({ url: import.meta.env.VITE_SUPABASE_URL, publishableKey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY });
 const wishesService = authService ? new WishesService({ auth: authService }) : null;
 let flow = fixtureMode ? repository.getFlow() : { state: States.IDLE };
@@ -37,7 +47,7 @@ const taskGate = new AsyncTaskGate();
 const statusNames = { [States.SEALED]: '保管中', [States.EXPIRED]: '已到期待决定', [States.PURCHASE_READY]: '决定购买', [States.ABANDONED]: '已放弃', [States.ARCHIVED]: '已归档' };
 const escape = (value) => String(value).replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
 const modeLabel = () => fixtureMode ? '开发测试数据' : wishTestMode ? `阶段 5 开发测试情景 · ${wishTest}` : productTestMode || evidenceTestMode ? '开发测试情景' : '阶段 5 · 愿望保管';
-const productSource = () => fixtureMode ? '开发 fixture（非淘宝实时结果）' : productTestMode ? '开发测试情景（不访问外部接口）' : '淘宝联盟实时候选';
+const productSource = () => fixtureMode ? '开发 fixture（非淘宝实时结果）' : wishTestMode || productTestMode ? '开发测试情景（不访问外部接口）' : '淘宝联盟实时候选';
 const productSlot = '<div data-product-summary></div>';
 
 function appendProductSummary(target, product) {
@@ -54,8 +64,8 @@ function appendProductSummary(target, product) {
   const text = document.createElement('div'); const title = document.createElement('strong'); title.textContent = String(product.title ?? '未命名商品'); text.append(title);
   const price = document.createElement('p');
   if (product.provider === 'taobao') {
-    const amounts = productPriceText(product);
-    price.textContent = amounts?.estimated !== null ? `销售价 ${displayPrice(amounts.sales)} · 预估到手价 ${displayPrice(amounts.estimated)}` : `销售价 ${displayPrice(amounts?.sales)}`;
+    const amounts = productPriceText(product) ?? (Number.isFinite(product.sellingPrice) ? { sales: product.sellingPrice, estimated: Number.isFinite(product.estimatedPrice) ? product.estimatedPrice : null } : null);
+    price.textContent = amounts && amounts.estimated !== null ? `销售价 ${displayPrice(amounts.sales)} · 预估到手价 ${displayPrice(amounts.estimated)}` : `销售价 ${displayPrice(amounts?.sales)}`;
   } else { price.textContent = `标价 ${displayPrice(product.listPrice)} · 销售价 ${displayPrice(product.sellingPrice)} · 预估到手价 ${displayPrice(product.estimatedPrice)}`; }
   text.append(price); summary.append(text); target.append(summary);
 }
@@ -76,7 +86,7 @@ function taskIsCurrent(token, expectedState) { return view === Views.FLOW && tas
 
 function render() {
   clearInterval(timer);
-  if (!fixtureMode && !productTestMode && !productService.configured) { root.innerHTML = `<main class="app-shell unavailable"><h1>商品服务尚未配置</h1><p>请配置公开 Supabase URL 与 publishable key 后再进行商品搜索；阶段 1 诊断仍在 <a href="diagnostic.html">诊断页</a>。</p></main>`; return; }
+  if (!fixtureMode && !productTestMode && !wishTestMode && !productService.configured) { root.innerHTML = `<main class="app-shell unavailable"><h1>商品服务尚未配置</h1><p>请配置公开 Supabase URL 与 publishable key 后再进行商品搜索；阶段 1 诊断仍在 <a href="diagnostic.html">诊断页</a>。</p></main>`; return; }
   if (view === Views.WISHES) return renderWishes();
   const record = fixtureMode && flow.recordId ? repository.getWish(flow.recordId) : null;
   if (record && flow.state === States.SEALED) {
@@ -103,8 +113,8 @@ function render() {
 }
 
 function renderHome() {
-  const eyebrow = fixtureMode ? '开发测试数据' : productTestMode ? `开发测试情景 · ${productTest}` : '淘宝联盟实时候选';
-  const description = fixtureMode ? '显式本地测试模式：不请求淘宝、知乎或转链服务。' : productTestMode ? '显式开发测试情景：不请求 Supabase、淘宝、知乎或转链服务。' : '搜索仅展示淘宝联盟返回的可推广商品；实际价格以淘宝结算页为准。';
+  const eyebrow = fixtureMode ? '开发测试数据' : wishTestMode ? `阶段 5 开发测试情景 · ${wishTest}` : productTestMode ? `开发测试情景 · ${productTest}` : '淘宝联盟实时候选';
+  const description = fixtureMode ? '显式本地测试模式：不请求淘宝、知乎或转链服务。' : wishTestMode ? '显式阶段 5 测试：不会请求 Supabase、淘宝、知乎、邮件或转链服务。' : productTestMode ? '显式开发测试情景：不请求 Supabase、淘宝、知乎或转链服务。' : '搜索仅展示淘宝联盟返回的可推广商品；实际价格以淘宝结算页为准。';
   shell(`<section class="hero"><p class="eyebrow">${eyebrow}</p><h1>先把想买的东西，保管一会儿。</h1><p>${description}</p><form id="search-form"><label for="search-input">想找什么商品？</label><input id="search-input" name="query" maxlength="80" placeholder="例如：便携咖啡机" value="${escape(flow.query ?? '')}" /><p id="input-error" class="input-error" role="alert"></p><div class="examples"><button type="button" data-example="便携咖啡机">便携咖啡机</button><button type="button" data-example="降噪耳机">降噪耳机</button><button type="button" data-example="露营灯">露营灯</button></div><button class="primary" type="submit">交给看山看看</button></form></section>${fixtureMode ? `<section class="test-panel"><h2>开发测试开关</h2><label>证据状态 <select id="evidence-mode"><option value="both">两类证据都有</option><option value="partial">只有专业类证据</option><option value="none">没有相关证据</option><option value="error">证据加载失败</option></select></label><label>候选异常 <select id="product-mode"><option value="normal">正常候选</option><option value="broken">首张图片加载失败</option><option value="missing-promotion">首条缺少推广链接</option></select></label></section>` : ''}`);
   root.querySelector('#search-form').addEventListener('submit', (event) => { event.preventDefault(); const query = normalizeClientQuery(new FormData(event.currentTarget).get('query')); if (!query) { root.querySelector('#input-error').textContent = '请输入 2 到 80 个字符的商品名称、品牌或型号。'; return; } root.querySelector('[type="submit"]').disabled = true; flow = { state: States.IDLE, query, evidenceMode: fixtureMode ? root.querySelector('#evidence-mode').value : null, productMode: fixtureMode ? root.querySelector('#product-mode').value : null }; save(States.PRODUCT_SEARCHING); });
   root.querySelectorAll('[data-example]').forEach((button) => button.addEventListener('click', () => { root.querySelector('#search-input').value = button.dataset.example; }));
@@ -114,7 +124,7 @@ function renderSearching() {
   const task = taskGate.begin();
   const query = flow.query;
   const productMode = flow.productMode;
-  const copy = fixtureMode ? ['开发测试数据', '正在整理静态候选', '不会访问真实淘宝联盟接口。'] : productTestMode ? [`开发测试情景 · ${productTest}`, '正在演练商品搜索状态', '不会访问 Supabase 或淘宝联盟接口。'] : ['淘宝联盟实时候选', '正在搜索符合条件的商品', '仅展示当次返回且可推广的候选。'];
+  const copy = fixtureMode ? ['开发测试数据', '正在整理静态候选', '不会访问真实淘宝联盟接口。'] : wishTestMode ? [`阶段 5 开发测试情景 · ${wishTest}`, '正在演练愿望保管流程', '不会访问 Supabase、淘宝、知乎、邮件或转链服务。'] : productTestMode ? [`开发测试情景 · ${productTest}`, '正在演练商品搜索状态', '不会访问 Supabase 或淘宝联盟接口。'] : ['淘宝联盟实时候选', '正在搜索符合条件的商品', '仅展示当次返回且可推广的候选。'];
   shell(`<section class="center-state"><span class="loader" aria-hidden="true"></span><p class="eyebrow">${copy[0]}</p><h1>${copy[1]}</h1><p>${copy[2]}</p></section>`);
   setTimeout(async () => {
     try {
@@ -132,7 +142,7 @@ function renderSearching() {
 }
 
 function renderProducts() {
-  const label = fixtureMode ? '开发测试数据' : productTestMode ? `开发测试情景 · ${productTest}` : '淘宝联盟实时候选';
+  const label = fixtureMode ? '开发测试数据' : wishTestMode ? `阶段 5 开发测试情景 · ${wishTest}` : productTestMode ? `开发测试情景 · ${productTest}` : '淘宝联盟实时候选';
   shell(`<section><p class="eyebrow">${label} · ${escape(flow.query)}</p><h1>从候选中选择一件</h1><p>实际价格以淘宝结算页为准。</p><div id="product-list" class="products"></div><button class="quiet-button" data-action="home">重新输入</button></section>`);
   const list = root.querySelector('#product-list');
   flow.products.forEach((product, index) => {
@@ -229,9 +239,14 @@ function renderAbandoned(record) { const amount = Number(record.countedAmount ??
 async function getTimeline() {
   if (fixtureMode) return repository.list().map(normalizeWish);
   if (wishTestMode) return wishScenario.store.list();
-  const data = await wishesService.list();
-  const rows = Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : [];
-  return rows.map((row) => normalizeWish(row.wish ?? row));
+  const all = []; let offset = 0; let page;
+  do { page = await wishesService.list({ offset }); all.push(...page.items.map((row) => normalizeWish(row.wish ?? row))); offset = page.nextOffset; } while (page.hasMore && Number.isInteger(offset));
+  return all;
+}
+async function getWishPage(offset = 0) {
+  if (fixtureMode) { const items = repository.list().map(normalizeWish); return { items: items.slice(offset, offset + 20), nextOffset: offset + 20 < items.length ? offset + 20 : null, hasMore: offset + 20 < items.length, summary: summarizeWishes(items) }; }
+  if (wishTestMode) { const items = wishScenario.store.list(); return { items: items.slice(offset, offset + 20), nextOffset: offset + 20 < items.length ? offset + 20 : null, hasMore: offset + 20 < items.length, summary: summarizeWishes(items) }; }
+  const page = await wishesService.list({ offset }); return { ...page, items: page.items.map((row) => normalizeWish(row.wish ?? row)) };
 }
 function appendWishRow(list, wish) {
   const row = document.createElement('article'); row.className = 'wish-row';
@@ -248,7 +263,7 @@ function renderWishes() {
   const list = root.querySelector('#wish-list'); const summary = root.querySelector('#wish-summary');
   const identity = document.createElement('section'); identity.className = 'identity-panel';
   const identityTitle = document.createElement('h2'); identityTitle.textContent = '跨浏览器找回';
-  const identityHint = document.createElement('p'); identityHint.textContent = wishTestMode ? '开发测试情景不发送邮件。正式环境可先绑定邮箱，再在其他浏览器使用已有邮箱验证码登录。' : '先以匿名身份使用；可选绑定邮箱。已有邮箱登录严格禁止自动注册。';
+  const identityHint = document.createElement('p'); identityHint.textContent = wishTestMode ? '开发测试情景不发送邮件。正式环境可先绑定邮箱，再在其他浏览器使用已有邮箱验证码登录。' : '已创建首条愿望后，可选绑定邮箱以跨浏览器找回；这不会阻断继续使用。已有邮箱登录严格禁止自动注册。';
   identity.append(identityTitle, identityHint);
   if (!wishTestMode && authService) {
     const email = document.createElement('input'); email.type = 'email'; email.placeholder = '邮箱'; email.autocomplete = 'email';
@@ -258,23 +273,24 @@ function renderWishes() {
     const verifyBind = document.createElement('button'); verifyBind.className = 'quiet-button'; verifyBind.textContent = '确认绑定';
     const requestLogin = document.createElement('button'); requestLogin.className = 'quiet-button'; requestLogin.textContent = '发送已有账户登录验证码';
     const verifyLogin = document.createElement('button'); verifyLogin.className = 'quiet-button'; verifyLogin.textContent = '验证登录';
-    let bindingOwnerId = null;
+    let bindingOwnerId = null; let anonymousSourceToken = null;
     bind.addEventListener('click', async () => { try { const result = await authService.bindEmail(email.value.trim()); bindingOwnerId = result.ownerIdBefore; message.textContent = '绑定验证码已请求；请在当前浏览器完成确认。'; } catch (error) { message.textContent = error.message; } });
     verifyBind.addEventListener('click', async () => { try { await authService.verifyBinding(email.value.trim(), token.value.trim(), bindingOwnerId); message.textContent = '邮箱已绑定，身份未更换。'; } catch (error) { message.textContent = error.message; } });
-    requestLogin.addEventListener('click', async () => { try { await authService.requestExistingLogin(email.value.trim()); message.textContent = '已有账户登录验证码已请求；不存在邮箱不会自动注册。'; } catch (error) { message.textContent = error.message; } });
-    verifyLogin.addEventListener('click', async () => { try { await authService.verifyExistingLogin(email.value.trim(), token.value.trim()); message.textContent = '登录成功，正在读取当前账户愿望。'; renderWishes(); } catch (error) { message.textContent = error.message; } });
+    requestLogin.addEventListener('click', async () => { try { const request = await authService.requestExistingLogin(email.value.trim()); anonymousSourceToken = request.sourceToken; message.textContent = '已有账户登录验证码已请求；不存在邮箱不会自动注册。'; } catch (error) { message.textContent = error.message; } });
+    verifyLogin.addEventListener('click', async () => { try { await authService.verifyExistingLogin(email.value.trim(), token.value.trim()); const migrated = await wishesService.migrate(anonymousSourceToken); anonymousSourceToken = null; message.textContent = migrated.movedCount ? '登录成功，匿名愿望已迁入当前账户。' : '登录成功，正在读取当前账户愿望。'; renderWishes(); } catch (error) { message.textContent = error.message; } });
     identity.append(email, token, bind, verifyBind, requestLogin, verifyLogin, message);
   }
   list.before(identity);
   (async () => { try {
-    const wishes = await getTimeline(); const stats = summarizeWishes(wishes); let shown = 20;
+    let page = await getWishPage(0); const wishes = [...page.items]; const stats = page.summary ?? summarizeWishes(wishes);
     summary.textContent = `保管中 ${stats.sealedCount} 条 · 待决定 ${stats.expiredCount} 条 · 已放下计划支出 ${displayPrice(stats.abandonedListedAmount)}`;
-    const paint = () => { list.replaceChildren(); const grouped = groupWishes(wishes.slice(0, shown), { page: 0, pageSize: shown }); if (!grouped.items.length) { list.textContent = '暂无愿望。'; return; } grouped.items.forEach((wish) => appendWishRow(list, wish)); if (shown < wishes.length) { const more = document.createElement('button'); more.className = 'secondary'; more.textContent = '加载更多'; more.addEventListener('click', () => { shown += 20; paint(); }); list.append(more); } };
+    const paint = () => { list.replaceChildren(); const grouped = groupWishes(wishes, { page: 0, pageSize: wishes.length || 20 }); if (!grouped.items.length) { list.textContent = '暂无愿望。'; return; } grouped.items.forEach((wish) => appendWishRow(list, wish)); if (page.hasMore) { const more = document.createElement('button'); more.className = 'secondary'; more.textContent = '加载更多'; more.addEventListener('click', async () => { more.disabled = true; try { page = await getWishPage(page.nextOffset); wishes.push(...page.items); paint(); } catch (error) { summary.textContent = error instanceof Error ? error.message : '愿望读取失败。'; } }); list.append(more); } };
     paint();
   } catch (error) { summary.textContent = error instanceof Error ? error.message : '愿望读取失败。'; } })();
-  root.querySelector('#clear-wishes').addEventListener('click', async () => { if (!window.confirm('确认清空全部愿望？此操作与删除单条不同且不可恢复。')) return; if (fixtureMode) repository.clearFlow(); else if (wishTestMode) wishScenario.store.clear(); else await wishesService.clear(); renderWishes(); });
-  root.querySelector('#sign-out').addEventListener('click', async () => { if (authService) await authService.signOut(); flow={state:States.IDLE}; view=Views.FLOW; render(); });
-  root.querySelector('#delete-account').addEventListener('click', () => { window.alert('删除账户需要远程受控 Edge Function；本地开发不执行真实删除。'); });
+  root.querySelector('#clear-wishes').textContent = '清空已完成愿望';
+  root.querySelector('#clear-wishes').addEventListener('click', async () => { if (!window.confirm('确认清空已完成愿望？保管中和待决定愿望不会被删除。')) return; try { if (fixtureMode) repository.clearFlow(); else if (wishTestMode) wishScenario.store.clearCompleted?.(); else await wishesService.clear(); renderWishes(); } catch (error) { summary.textContent = error instanceof Error ? error.message : '清空失败，请重试。'; } });
+  root.querySelector('#sign-out').addEventListener('click', async () => { try { if (authService) await authService.signOut({ scope: 'local' }); flow={state:States.IDLE}; view=Views.FLOW; render(); } catch (error) { summary.textContent = error instanceof Error ? error.message : '退出失败，请重试。'; } });
+  root.querySelector('#delete-account').addEventListener('click', async () => { if (!window.confirm('删除账户会删除全部愿望和绑定身份，确定继续吗？') || !window.confirm('请再次确认：此操作不可恢复。')) return; try { if (wishTestMode) { wishScenario.store.clear(); flow={state:States.IDLE}; view=Views.FLOW; render(); return; } await wishesService.deleteAccount(); await authService.signOut({ scope: 'local' }); flow={state:States.IDLE}; view=Views.FLOW; render(); } catch (error) { summary.textContent = error instanceof Error ? error.message : '删除账户失败，请重试。'; } });
 }
 function renderError() { const label = fixtureMode ? '开发测试错误状态' : productTestMode || evidenceTestMode ? `开发测试情景 · ${evidenceTest ?? productTest}` : flow.failedStage === 'evidence' ? '知乎证据未完成' : '商品搜索未完成'; shell(`<section class="error-state"><p class="eyebrow">${label}</p><h1>这一步不能继续</h1><p>${escape(flow.error ?? '发生了未分类错误。')}</p><button class="primary" data-action="home">返回首页</button></section>`); }
 

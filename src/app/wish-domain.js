@@ -9,11 +9,16 @@ export function safeUrl(value) {
   if (typeof value !== 'string' || /[\u0000-\u001F\u007f]/.test(value)) return null;
   try { const url = new URL(value.trim()); return url.protocol === 'https:' ? url.href : null; } catch { return null; }
 }
+export function approvedPromotionUrl(value) {
+  const normalized = safeUrl(value); if (!normalized) return null;
+  const host = new URL(normalized).hostname.toLowerCase();
+  return ['taobao.com', 'tmall.com', 'e.tb.cn'].some((domain) => host === domain || host.endsWith(`.${domain}`)) ? normalized : null;
+}
 export function snapshotProduct(product) {
   if (!product || typeof product.itemId !== 'string' || !product.itemId.trim() || typeof product.title !== 'string' || !product.title.trim()) return null;
   const sellingPrice = money(product.price ?? product.sellingPrice);
   const estimatedPrice = money(product.finalPrice ?? product.estimatedPrice);
-  const promotionUrl = safeUrl(product.promotionUrl);
+  const promotionUrl = approvedPromotionUrl(product.promotionUrl);
   if (sellingPrice === null || !promotionUrl) return null;
   return { provider: 'taobao', itemId: product.itemId.trim(), title: product.title.trim(), imageUrl: safeUrl(product.imageUrl), sellingPrice, estimatedPrice: estimatedPrice !== null && estimatedPrice !== sellingPrice ? estimatedPrice : null, priceLabel: estimatedPrice !== null && estimatedPrice !== sellingPrice ? '预估到手价' : '销售价', promotionUrl };
 }
@@ -61,6 +66,7 @@ export class DevelopmentWishStore {
   }
   list() { this.wishes = this.wishes.map((wish) => syncWishExpiry(wish, this.now())); return clone(this.wishes); }
   decide(id, decision) {
+    if (!['purchase', 'abandon'].includes(decision)) throw new WishDomainError('invalid_decision');
     const wish = this.wishes.find((item) => item.id === id); if (!wish) throw new WishDomainError('not_found');
     Object.assign(wish, syncWishExpiry(wish, this.now()));
     if ([WishStatuses.PURCHASED_INTENT, WishStatuses.ABANDONED].includes(wish.status)) return clone(wish);
@@ -72,5 +78,6 @@ export class DevelopmentWishStore {
     return clone(wish);
   }
   delete(id) { this.wishes = this.wishes.filter((wish) => wish.id !== id); }
+  clearCompleted() { this.wishes = this.wishes.filter((wish) => [WishStatuses.SEALED, WishStatuses.EXPIRED].includes(syncWishExpiry(wish, this.now()).status)); }
   clear() { this.wishes = []; }
 }

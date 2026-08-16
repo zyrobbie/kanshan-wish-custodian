@@ -1,20 +1,21 @@
 # 阶段 5 验收记录
 
-> 状态：本地实现完成，等待独立远程验收；阶段 6 未开始。
+> 状态：阶段 5 本地返工完成，远程数据库/Auth/OTP 验收仍未执行；阶段 6 未开始。
 
 ## 代码完成
 
 - 新增共享愿望领域模型：受控时长、商品快照、绝对到期、状态分组、分页、实时统计与一次性放弃金额。
 - 新增集中 Auth 服务：匿名会话初始化去重、匿名邮箱绑定、已有保管箱 OTP（固定 `shouldCreateUser:false`）与退出设备。
+- 首次访问的 `AuthSessionMissingError` 现在视为正常无会话状态，继续创建匿名身份；已有匿名会话和已绑定邮箱会话会复用。
 - 新增正式 RPC 服务：创建、列表、决定、删除、清空与匿名迁移调用；浏览器不提交 `owner_id`、任意到期时间或决定金额。
-- 新增 `PHASE5_SCHEMA_DRAFT.sql`：服务端时钟、每用户 5 条活动上限、advisory lock、幂等键、条件决定、实时统计、RLS/RPC 权限设计。
+- SQL 设计稿撤销浏览器对 `wishes` 的直接 INSERT/UPDATE/DELETE，改为固定 `search_path`、`auth.uid()` 校验、锁后幂等查询的受控 RPC；列表返回 `items`、`nextOffset`、`hasMore` 和全量 `summary`。
 - 新增本地 `delete-my-account` Edge Function；未部署、未调用。
 - 开发测试参数 `wishTest` 只在 Vite 开发构建中被识别，明确显示“阶段 5 开发测试情景”，不调用 Supabase、邮件、淘宝、知乎或转链接口。
 
 ## 静态检查
 
-- `npm test`：43/43 通过（阶段 1–4 原有 33 项保持通过）。
-- `npm run check`：通过（含密钥扫描、43 项单元测试、阶段 1–5 静态基线、生产构建和构建产物扫描）。
+- `npm test`：47/47 通过。
+- `npm run check`：通过（含密钥扫描、47 项单元测试、阶段 1–5 静态基线、生产构建和构建产物扫描）。
 - `npm run build`：通过；生产构建不含 `wishTest` 的 Vite 开发分支。
 - `git diff --check`：通过。
 
@@ -24,7 +25,7 @@ N/A。本轮真实淘宝、知乎、转链、Supabase 远程数据库、Auth、�
 
 ## 浏览器验证
 
-本轮环境未提供可操作的受控浏览器绑定；未将静态或单元测试冒充浏览器验收。待独立验收方使用本地 Vite 的显式 `wishTest` 情景完成：创建、24 秒到期、购买/放下、列表恢复、分页、删除/清空、刷新恢复和手机宽度检查。任何本地测试结果都不代表真实 Supabase、SMTP、Chrome/Safari 或微信/知乎 WebView 验收。
+本地 Vite 受控浏览器已逐项打开 20 个 `wishTest` 场景，均未请求外部服务且控制台错误为 0；分页从 20 条加载至 22 条通过。创建、封存与“到期后购买”操作已验证；四个宽度 320/375/390/430px 均无横向溢出。`refresh-restore` 在开发模式仅用 `sessionStorage` 固定非敏感测试时钟，重复加载保留相同 `expiresAt`；正式模式不使用该存储，而是从服务端活动愿望恢复绝对到期。上述仅是本地开发情景，不代表真实 Supabase、SMTP、跨浏览器或 WebView 验收。
 
 ## 数据库 / RLS 验证
 
