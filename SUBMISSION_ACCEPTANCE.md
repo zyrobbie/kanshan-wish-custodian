@@ -7,12 +7,13 @@
 - 首页最终视觉基线为 `fa8798a`（`fix: preserve approved homepage artwork`）。`public/assets/kanshan-home/home-reference-original.png` 的 SHA-256 为 `71954e1c57623fba2ac25e18862513a255d7bf04296d9136ad19427d17fca545`。
 - 首页仍直接使用该定稿图；只保留既有真实输入、提交、愿望入口与局部遮罩覆盖层，没有重新设计、拆图或新增首页统计、字符计数、营销文案和动画。
 - 正式页已移除面向测试者的阶段号、研发术语和可交互的未验收邮箱操作；本地测试 URL 仍明确显示“开发测试”。
+- 发布前复验发现正式应用分别创建商品、知乎与身份客户端时会产生多个 GoTrueClient 警告。现由 `production-services.js` 只创建一个共享 client，并注入商品搜索、知乎证据、身份与愿望服务；匿名会话与后续服务调用继续共用同一身份上下文。本地 fixture 与各类开发测试情景仍不创建该正式服务组合。
 - 购物卡、愿望状态、金额统计与链接安全边界保持不变：只使用愿望快照中的安全官方推广链接，不重搜、不转链、不自动外跳。
 - GitHub Pages 工作流名称已更新为正式产品名称；构建时固定使用 `/kanshan-wish-custodian/` 子路径，公开 Supabase 配置仍只从 GitHub Environment Variables 注入。
 
 ## 静态检查
 
-- `npm test`：56/56 通过。
+- `npm test`：57/57 通过（新增正式服务组合只初始化一个 Supabase client 的断言）。
 - `npm run check`：通过，包括阶段 1–6 静态控制、测试、构建和构建产物扫描。
 - `npm run build`：通过。
 - `VITE_BASE_PATH=/kanshan-wish-custodian/ npm run build`：通过；构建产物使用该子路径，未发现错误的根路径首页资源引用。
@@ -40,6 +41,7 @@ N/A。本轮未调用淘宝、知乎、转链接、邮件或 Supabase 接口。
 
 - 生产构建不自动启用 fixture 或开发测试面板。
 - 首页定稿图通过 `import.meta.env.BASE_URL` 解析，适配 GitHub Pages 项目子路径。
+- 使用不可连接的本地公开测试配置（`127.0.0.1:9`）和正确 Pages base 预览：首页与“我的愿望”页均为 warning 0、error 0；没有邮箱输入、OTP 操作或开发测试面板，也没有触发真实 Supabase、淘宝、知乎、邮件或转链接请求。
 - 未进行 GitHub Pages 公网部署或正式来源浏览器验证。
 
 ## 尚未执行的公网验证与延期项

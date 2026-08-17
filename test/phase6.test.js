@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { savedPromotionHref, WishStatuses } from '../src/app/wish-domain.js';
 import { shoppingCardSnapshot } from '../src/app/shopping-card.js';
+import { createProductionServices } from '../src/app/production-services.js';
 
 const promotion = 'https://s.click.taobao.com/keep-this-exact';
 const wish = Object.freeze({
@@ -41,6 +42,22 @@ test('phase6 Liu Kanshan presentation states are static and cannot mutate a wish
   for (const state of ['guard', 'release']) assert.match(main, new RegExp(`liuKanshan\\('${state}'\\)`));
   assert.doesNotMatch(main, /kanshanCharacter|kanshan-character/);
   assert.equal(wish.status, before);
+});
+
+test('phase6 production composition creates one shared Supabase client for every service', () => {
+  let clientCalls = 0;
+  const sharedClient = { auth: {}, functions: {} };
+  const services = createProductionServices({
+    url: 'https://example.supabase.co',
+    publishableKey: 'public-test-key',
+    createSupabaseClient: () => { clientCalls += 1; return sharedClient; },
+  });
+  assert.equal(clientCalls, 1);
+  assert.equal(services.client, sharedClient);
+  assert.equal(services.productService.client, sharedClient);
+  assert.equal(services.evidenceService.client, sharedClient);
+  assert.equal(services.authService.client, sharedClient);
+  assert.equal(services.wishesService.auth, services.authService);
 });
 
 test('phase6 abandon accounting stays server-domain based: purchase intent is excluded and abandon is idempotent', async () => {
