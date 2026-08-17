@@ -6,14 +6,14 @@
 
 | 项目 | 当前值 |
 |---|---|
-| 交接日期 | 2026-08-16 |
+| 交接日期 | 2026-08-17 |
 | 本地工作目录 | `/Users/zhihu/Documents/ChatGPT/看山愿望商店` |
 | GitHub 仓库 | `https://github.com/zyrobbie/kanshan-wish-custodian` |
 | 默认分支 | `main` |
 | 阶段 1 验收提交 | `af3449ec26146bd42344df49165d06206ba4802d`（短提交号 `af3449e`） |
 | 公网诊断地址 | `https://zyrobbie.github.io/kanshan-wish-custodian/` |
-| 当前阶段 | 阶段 1–4 已完成；阶段 5 本地返工完成、远程验收待进行；阶段 6 未开始 |
-| 当前交付物性质 | 阶段 1 在线诊断基线＋阶段 2 本地静态产品流程＋阶段 3 真实淘宝搜索＋阶段 4 真实知乎双层内容；尚不是正式愿望持久化的最终 Demo |
+| 当前阶段 | 阶段 1–4 已完成；阶段 5 数据库/RPC 远程核心验收已通过、环境验收待进行；阶段 6 未开始 |
+| 当前交付物性质 | 阶段 1 在线诊断基线＋阶段 2 本地静态产品流程＋阶段 3 真实淘宝搜索＋阶段 4 真实知乎双层内容＋阶段 5 数据库/RPC 核心持久化；尚不是正式愿望持久化的最终 Demo |
 | 阶段 2 冻结代码基线 | `4c29383`（初始功能提交 `19998f7`） |
 | 阶段 3 冻结代码基线 | `8908331`（远程 `products-search` 活动版本 5） |
 | 阶段 4 冻结代码基线 | `07b6a4d`（远程 `zhihu-search` 活动版本 3） |
@@ -540,7 +540,7 @@ idle → product_searching → product_selecting
 
 退出条件：至少三类不同商品完成实时双层验证，内容可追溯，部分失败不阻塞保管。
 
-当前记录：远程 `zhihu-search`、三类商品真实专业/体验双层接口、本地异常情景和一条本地真实模式完整浏览器流程均已通过；冻结代码基线为 `07b6a4d`，详见 `PHASE4_ACCEPTANCE.md`。阶段 5 本地返工已复验服务端恢复设计、本地行为型情景、SQL 权限草案与账户删除边界，仍未做任何远程变更。
+当前记录：远程 `zhihu-search`、三类商品真实专业/体验双层接口、本地异常情景和一条本地真实模式完整浏览器流程均已通过；冻结代码基线为 `07b6a4d`，详见 `PHASE4_ACCEPTANCE.md`。阶段 5 已实际应用两项生命周期/旧形状兼容 migration，并完成数据库/RPC、RLS 和阶段 1 旧记录保留的远程核心验收。
 
 ### 10.4 阶段 5：愿望保管与完整身份流程
 
@@ -556,7 +556,7 @@ idle → product_searching → product_selecting
 
 退出条件：刷新、返回、重复点击、并发浏览器、迁移、删除和金额边界全部通过。
 
-当前记录：本地 Auth 服务、愿望 RPC 服务、服务端恢复逻辑、行为型开发测试情景、账户删除函数和 `PHASE5_SCHEMA_DRAFT.sql` 已提交；`PHASE5_ACCEPTANCE.md` 是最新本地验收依据。因 Supabase CLI 缺失，尚未生成或部署正式 migration；远程 RLS、SMTP、跨浏览器、Cron 和 WebView 均等待独立验收。阶段 6 未开始。
+当前记录：本地 Auth 服务、愿望 RPC 服务、服务端恢复逻辑、行为型开发测试情景、账户删除函数和 `PHASE5_SCHEMA_DRAFT.sql` 已提交；`PHASE5_ACCEPTANCE.md` 是最新验收依据。已实际应用 `20260817044635 phase5_wish_lifecycle` 与 `20260817045332 phase5_legacy_shape_compatibility`；`migrate-anonymous-wishes` v6 为 ACTIVE，`verify_jwt=true`。数据库/RPC、A/B RLS 隔离、直接 DML/TRUNCATE 撤销和 9 条阶段 1 旧记录保留已经通过。真实 OTP、正式 Pages 全流程、Cron、删除账户远程功能、跨浏览器和真实 WebView 仍等待独立验收。阶段 6 未开始。
 
 ### 10.5 阶段 6：官方推广链接与购物卡
 
@@ -807,6 +807,7 @@ idle → product_searching → product_selecting
 - [ ] 接手方理解 `main` push 会自动部署公网；
 - [ ] 接手方理解不能清理远端验收数据或重建项目；
 - [x] 阶段 2 已完成并冻结在 `4c29383`；阶段 3 已完成并冻结在 `8908331`；阶段 4 已完成并冻结在 `07b6a4d`。
-- [ ] 阶段 5 仅本地实现完成；正式 migration、远程 RLS/Auth/SMTP/Cron 与真实 WebView 尚未授权或验收；阶段 6 未开始。
+- [x] 阶段 5 数据库/RPC 核心验收已通过：两项 migration 已应用、`migrate-anonymous-wishes` v6 已部署，旧记录保留与 RLS 隔离已核对。
+- [ ] 阶段 5 真实 OTP、正式 Pages 流程、Cron、删除账户远程功能、跨浏览器和真实 WebView 仍未完成；阶段 6 未开始。
 
 完成以上确认后，新团队可以长期接管本项目。任何超出冻结范围的产品变化，应先形成书面变更说明、影响评估和新验收标准，再实施代码或基础设施变更。

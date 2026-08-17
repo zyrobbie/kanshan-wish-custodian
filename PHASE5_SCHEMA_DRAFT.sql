@@ -10,9 +10,13 @@ alter table public.wishes
 alter table public.wishes
   add constraint wishes_idempotency_key_unique unique (owner_id, idempotency_key),
   -- Existing Stage 1 diagnostic rows may be intentionally smaller snapshots.
-  -- NOT VALID preserves them while enforcing the Stage 5 shape for new writes.
+  -- NOT VALID avoids an initial table scan, while the idempotency-key guard keeps
+  -- later lifecycle updates compatible with those legacy rows. All Stage 5 RPC
+  -- creates require a non-null idempotency key and therefore enforce the shape.
   add constraint wishes_product_shape_check check (
-    product ? 'itemId' and product ? 'title' and product ? 'sellingPrice' and product ? 'promotionUrl'
+    idempotency_key is null or (
+      product ? 'itemId' and product ? 'title' and product ? 'sellingPrice' and product ? 'promotionUrl'
+    )
   ) not valid;
 
 create index if not exists wishes_owner_active_idx on public.wishes (owner_id, expires_at)
@@ -20,7 +24,7 @@ create index if not exists wishes_owner_active_idx on public.wishes (owner_id, e
 
 -- Browser clients may read only through their existing RLS policy. Lifecycle
 -- authority fields are writable only by the audited functions below.
-revoke insert, update, delete on table public.wishes from public, anon, authenticated;
+revoke insert, update, delete, truncate on table public.wishes from public, anon, authenticated;
 
 create or replace function public.phase5_valid_promotion_url(p_value text)
 returns boolean language sql immutable set search_path = '' as $$

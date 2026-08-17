@@ -2,9 +2,9 @@
 
 项目、功能与开发流程规格书
 
-- 文档版本：`v1.7`
-- 编写日期：`2026-08-16`
-- 当前状态：阶段 5 本地返工完成，等待独立远程验收；阶段 6 未开始
+- 文档版本：`v1.9`
+- 编写日期：`2026-08-17`
+- 当前状态：阶段 5 数据库/RPC 远程核心验收已通过；正式 OTP、Pages 全流程与真实 WebView 仍待验收；阶段 6 未开始
 - 适用范围：知乎 AI 创意黑客松可交互 Demo
 - 产品主张：把冲动交给看山，把决定留给自己
 
@@ -98,7 +98,7 @@ Demo 不替用户判断“该不该买”，也不以高佣商品诱导购买。
 | 阶段 2：静态产品流程 | 已完成 | 验收证据见 `PHASE2_ACCEPTANCE.md`；冻结代码基线为 `4c29383`；仅本地 fixture、状态机与浏览器结构验收，不调用外部业务接口、不部署 |
 | 阶段 3：淘联真实商品搜索 | 已完成 | 验收证据见 `PHASE3_ACCEPTANCE.md`；冻结代码基线为 `8908331`；远程函数、真实接口与本地真实模式浏览器候选选择均已通过 |
 | 阶段 4：知乎双层内容 | 已完成 | 证据见 `PHASE4_ACCEPTANCE.md`；冻结代码基线为 `07b6a4d`；远程函数、三类商品真实双层接口与本地真实模式浏览器流程均已通过 |
-| 阶段 5：愿望保管、服务端持久化与跨浏览器身份 | 本地返工完成，远程验收待进行 | 已复验服务端恢复设计、本地行为型测试、SQL 设计稿和账户删除边界；详见 `PHASE5_ACCEPTANCE.md`。未修改远程 Supabase、未创建正式 migration、未启用 Cron |
+| 阶段 5：愿望保管、服务端持久化与跨浏览器身份 | 数据库/RPC 远程核心验收已通过，环境验收待进行 | 已应用 `20260817044635 phase5_wish_lifecycle` 与 `20260817045332 phase5_legacy_shape_compatibility`，`migrate-anonymous-wishes` v6 为 ACTIVE（`verify_jwt=true`）；数据库/RPC、RLS 与旧记录兼容通过。真实 OTP、正式 Pages 全流程、Cron、删除账户与真实 WebView 仍待验收；详见 `PHASE5_ACCEPTANCE.md` |
 | 阶段 6 及后续 | 未开始 | 不得打开淘宝购物卡或进入后续流程 |
 
 ---
@@ -1192,7 +1192,7 @@ Supabase SDK 可以在浏览器保存标准登录会话；`localStorage` 仍不�
 
 退出条件：刷新、返回、重复点击等边界全部通过。
 
-状态：**本地返工完成，等待独立远程验收**。详见 `PHASE5_ACCEPTANCE.md` 与 `PHASE5_DEPLOY_MANIFEST.md`。正式恢复设计改为服务端活动愿望推导，开发 wishTest 仅是本地行为测试；由于本机没有 Supabase CLI，本轮仅提交 `PHASE5_SCHEMA_DRAFT.sql`，未伪造正式 migration；远程数据库、RLS、Auth、SMTP、Cron、函数、测试数据和 WebView 均未操作。阶段 6 未开始。
+状态：**数据库/RPC 远程核心验收已通过，环境验收尚未完成**。详见 `PHASE5_ACCEPTANCE.md` 与 `PHASE5_DEPLOY_MANIFEST.md`。已实际应用 `20260817044635 phase5_wish_lifecycle` 与 `20260817045332 phase5_legacy_shape_compatibility`，并部署 `migrate-anonymous-wishes` v6（ACTIVE、`verify_jwt=true`）。原有阶段 1 愿望、RPC 创建/列表/幂等/到期前决定拒绝、跨用户 RLS 隔离及直接 DML/TRUNCATE 撤销均已验收。真实邮箱 OTP、GitHub Pages 正式来源完整流程、Cron、删除账户远程功能和微信/知乎真实 WebView 仍待验收；阶段 6 未开始。
 
 ### 阶段 6：官方推广链接与购物卡
 
@@ -1359,3 +1359,4 @@ Supabase SDK 可以在浏览器保存标准登录会话；`localStorage` 仍不�
 | `v1.6` | 2026-08-16 | 阶段 4 远程函数、三类商品真实双层接口和本地真实模式浏览器验收完成；冻结代码基线为 `07b6a4d`，阶段 5 未开始。 |
 | `v1.7` | 2026-08-16 | 阶段 5 本地愿望保管、Auth/RPC 服务、SQL 设计稿与开发测试实现完成；正式 migration 与远程验收待独立执行，阶段 6 未开始。 |
 | `v1.8` | 2026-08-16 | 阶段 5 本地返工：修复首次匿名会话、受控 RPC 权威边界、服务端分页、匿名迁移、删除账户与开发测试刷新恢复；远程数据库/Auth/SMTP/Cron/WebView 仍待独立验收，阶段 6 未开始。 |
+| `v1.9` | 2026-08-17 | 阶段 5 远程兼容性与核心验收记录：两项生命周期/旧形状兼容 migration 已实际应用，`migrate-anonymous-wishes` v6 已部署；数据库/RPC、RLS 和阶段 1 旧记录保留通过。真实 OTP、正式来源浏览器流程、Cron、删除账户与真实 WebView 仍未完成。 |
