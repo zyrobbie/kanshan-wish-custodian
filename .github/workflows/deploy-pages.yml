@@ -1,4 +1,4 @@
-name: Deploy Phase 1 diagnostic to GitHub Pages
+name: Deploy Kanshan Wish Custody to GitHub Pages
 
 on:
   push:
@@ -29,13 +29,13 @@ jobs:
       - run: npm run check
       - name: Require frozen Pages base path
         env:
-          VITE_BASE_PATH: ${{ vars.VITE_BASE_PATH }}
+          VITE_BASE_PATH: /kanshan-wish-custodian/
         run: |
           test -n "$VITE_BASE_PATH"
           case "$VITE_BASE_PATH" in /*/) ;; *) exit 1 ;; esac
       - run: npm run build
         env:
-          VITE_BASE_PATH: ${{ vars.VITE_BASE_PATH }}
+          VITE_BASE_PATH: /kanshan-wish-custodian/
           VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
           VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
       - uses: actions/upload-pages-artifact@v3

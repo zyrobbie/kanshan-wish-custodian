@@ -9,6 +9,7 @@ for (const [source, needle] of [[main, 'shoppingCardSnapshot'], [main, "setAttri
   if (!source.includes(needle)) throw new Error(`Phase 6 control missing: ${needle}`);
 }
 if (main.includes('home-summary') || main.includes('kanshanCharacter') || existsSync('src/app/kanshan-character.js')) throw new Error('Homepage must not retain dynamic summary or temporary SVG mascot.');
+if (!main.includes("kanshanAsset('home-reference-original.png')")) throw new Error('Homepage must use the approved reference artwork through the configured base path.');
 for (const asset of ['public/assets/kanshan-home/home-reference-original.png', 'public/assets/kanshan-home/liu-kanshan-wave-transparent.png']) if (!existsSync(asset)) throw new Error(`Homepage asset missing: ${asset}`);
 if (/src=["'`]\/assets\/kanshan-home\//.test(main)) throw new Error('Homepage assets must honor the configured Pages base path.');
 for (const unsafe of ['window.open(', 'window.location.assign(', 'taoke-convert']) {

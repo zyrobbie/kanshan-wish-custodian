@@ -49,8 +49,8 @@ let recoveryInFlight = false;
 
 const statusNames = { [States.SEALED]: '保管中', [States.EXPIRED]: '已到期待决定', [States.PURCHASE_READY]: '决定购买', [States.ABANDONED]: '已放弃', [States.ARCHIVED]: '已归档' };
 const escape = (value) => String(value).replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
-const modeLabel = () => fixtureMode ? '开发测试数据' : wishTestMode ? `阶段 6 开发测试情景 · ${wishTest}` : productTestMode || evidenceTestMode ? '开发测试情景' : '阶段 6 · 愿望保管';
-const productSource = () => fixtureMode ? '开发 fixture（非淘宝实时结果）' : wishTestMode || productTestMode ? '开发测试情景（不访问外部接口）' : '淘宝联盟实时候选';
+const modeLabel = () => fixtureMode ? '开发测试数据' : wishTestMode ? `开发测试情景 · ${wishTest}` : productTestMode || evidenceTestMode ? '开发测试情景' : '看山·愿望寄存处';
+const productSource = () => fixtureMode ? '开发 fixture（非淘宝实时结果）' : wishTestMode || productTestMode ? '开发测试情景（不访问外部接口）' : '本次可推广商品';
 const productSlot = '<div data-product-summary></div>';
 const kanshanAsset = (file) => `${import.meta.env.BASE_URL}assets/kanshan-home/${file}`;
 const liuKanshan = (state = 'welcome') => `<img class="liu-kanshan liu-kanshan-${state}" src="${kanshanAsset('liu-kanshan-wave-transparent.png')}" alt="刘看山${state === 'guard' ? '正在守候这个愿望' : state === 'release' ? '轻轻送别这次决定' : '向你挥手'}" />`;
@@ -92,7 +92,7 @@ function taskIsCurrent(token, expectedState) { return view === Views.FLOW && tas
 
 function render() {
   clearInterval(timer);
-  if (!fixtureMode && !productTestMode && !wishTestMode && !productService.configured) { root.innerHTML = `<main class="app-shell unavailable"><h1>商品服务尚未配置</h1><p>请配置公开 Supabase URL 与 publishable key 后再进行商品搜索；阶段 1 诊断仍在 <a href="diagnostic.html">诊断页</a>。</p></main>`; return; }
+  if (!fixtureMode && !productTestMode && !wishTestMode && !productService.configured) { root.innerHTML = `<main class="app-shell unavailable"><h1>暂时无法开始搜索</h1><p>商品服务暂不可用，请稍后再试。</p></main>`; return; }
   if (view === Views.WISHES) return renderWishes();
   const record = fixtureMode && flow.recordId ? repository.getWish(flow.recordId) : null;
   if (record && flow.state === States.SEALED) {
@@ -235,9 +235,9 @@ async function createCustody(duration, button) {
     if (fixtureMode) repository.saveFlow(flow); render();
   } catch (error) { flow = { ...flow, error: error instanceof Error ? error.message : '愿望创建失败。', state: States.ERROR }; render(); }
 }
-function renderCustody() { const label = wishTestMode ? `阶段 6 开发测试情景 · ${wishTest}` : '演示时间'; shell(`<section><p class="eyebrow">${label}</p><h1>这次想保管多久？</h1>${productSlot}<p>正式产品对应 24 / 48 / 72 小时；当前 Demo 分别压缩为 24 / 48 / 72 秒。</p><div class="duration-list">${DemoDurations.map((seconds) => `<button class="duration" data-duration="${seconds}"><b>${seconds} 秒</b><span>对应 ${seconds} 小时</span></button>`).join('')}</div><p class="notice">创建与到期由服务端时间决定；刷新、页面恢复或后台返回时都会重新读取。</p></section>`); mountProductSummary(flow.product); root.querySelectorAll('[data-duration]').forEach((button) => button.addEventListener('click', () => createCustody(Number(button.dataset.duration), button))); }
+function renderCustody() { const label = wishTestMode ? `开发测试情景 · ${wishTest}` : '寄存时间'; shell(`<section><p class="eyebrow">${label}</p><h1>这次想保管多久？</h1>${productSlot}<p>正式产品对应 24 / 48 / 72 小时；当前演示分别压缩为 24 / 48 / 72 秒。</p><div class="duration-list">${DemoDurations.map((seconds) => `<button class="duration" data-duration="${seconds}"><b>${seconds} 秒</b><span>对应 ${seconds} 小时</span></button>`).join('')}</div><p class="notice">创建与到期以保存的到期时间为准；刷新、页面恢复或后台返回时都会重新读取。</p></section>`); mountProductSummary(flow.product); root.querySelectorAll('[data-duration]').forEach((button) => button.addEventListener('click', () => createCustody(Number(button.dataset.duration), button))); }
 
-function renderSealed(record) { if (!record) return renderWishes(); const update = () => { const left = expiryFromServer(record.expiresAt); if (left <= 0) { flow = { ...flow, record: { ...record, status: States.EXPIRED }, state: States.EXPIRED }; render(); return; } const counter = root.querySelector('#countdown'); if (counter) counter.textContent = `${left} 秒`; }; shell(`<section class="sealed"><div class="state-heading"><div><p class="eyebrow">已封存 · 演示模式</p><h1>先把它放在这里。</h1></div>${liuKanshan('guard')}</div>${productSlot}<div class="countdown" id="countdown" aria-live="polite">${expiryFromServer(record.expiresAt)} 秒</div><p>预计到期：<time id="expiry-time"></time></p><p class="notice">倒计时以服务端保存的到期时间为准。</p></section>`); const expiry = root.querySelector('#expiry-time'); expiry.dateTime = record.expiresAt; expiry.textContent = new Date(record.expiresAt).toLocaleTimeString('zh-CN'); mountProductSummary(record.product); update(); timer = setInterval(update, 500); }
+function renderSealed(record) { if (!record) return renderWishes(); const update = () => { const left = expiryFromServer(record.expiresAt); if (left <= 0) { flow = { ...flow, record: { ...record, status: States.EXPIRED }, state: States.EXPIRED }; render(); return; } const counter = root.querySelector('#countdown'); if (counter) counter.textContent = `${left} 秒`; }; const label = fixtureMode || wishTestMode ? '已封存 · 开发测试' : '已封存'; shell(`<section class="sealed"><div class="state-heading"><div><p class="eyebrow">${label}</p><h1>先把它放在这里。</h1></div>${liuKanshan('guard')}</div>${productSlot}<div class="countdown" id="countdown" aria-live="polite">${expiryFromServer(record.expiresAt)} 秒</div><p>预计到期：<time id="expiry-time"></time></p><p class="notice">倒计时以保存的到期时间为准。</p></section>`); const expiry = root.querySelector('#expiry-time'); expiry.dateTime = record.expiresAt; expiry.textContent = new Date(record.expiresAt).toLocaleTimeString('zh-CN'); mountProductSummary(record.product); update(); timer = setInterval(update, 500); }
 function equalButtons() { return `<div class="decision-row equal"><button class="decision" data-decision="purchase">我还是想买</button><button class="decision" data-decision="abandon">这次不买了</button></div>`; }
 async function decideCustody(record, decision, button) { button.disabled = true; try { const result = fixtureMode ? repository.decide(record.id, decision) : wishTestMode ? wishScenario.store.decide(record.id, decision) : await wishesService.decide(record.id, decision); const normalized = normalizeWish(result); flow = { ...flow, record: normalized, state: normalized.status === WishStatuses.PURCHASED_INTENT ? States.PURCHASE_READY : States.ABANDONED }; render(); } catch (error) { flow = { ...flow, error: error instanceof Error ? error.message : '决定保存失败。', state: States.ERROR }; render(); } }
 function renderExpired(record) { shell(`<section><p class="eyebrow">保管时间到了</p><h1>现在，你想怎么决定？</h1>${productSlot}<p>没有默认选择；两个决定的权重相同。</p>${equalButtons()}</section>`); mountProductSummary(record.product); root.querySelectorAll('[data-decision]').forEach((button) => button.addEventListener('click', () => decideCustody(record, button.dataset.decision, button))); }
@@ -300,13 +300,13 @@ function appendWishRow(list, wish) {
   }); row.append(remove); list.append(row);
 }
 function renderWishes() {
-  shell(`<section><p class="eyebrow">${wishTestMode ? `阶段 6 开发测试情景 · ${wishTest}` : '服务端愿望保管箱'}</p><h1>我的愿望</h1><p>愿望、状态和统计从当前身份的服务端记录读取；列表导航不会改变愿望生命周期。</p><p id="wish-summary" class="notice"></p><div id="wish-list"></div><button class="secondary" id="clear-wishes">清空愿望</button><button class="quiet-button" id="sign-out">退出当前设备</button>${wishTestMode ? '<button class="quiet-button" id="delete-account">删除账户（开发测试）</button>' : ''}<button class="quiet-button" data-action="home">开始新的搜索</button></section>`);
+  shell(`<section><p class="eyebrow">${wishTestMode ? `开发测试情景 · ${wishTest}` : '愿望清单'}</p><h1>我的愿望</h1><p>这里会保留当前身份下的愿望和决定记录。</p><p id="wish-summary" class="notice"></p><div id="wish-list"></div><button class="secondary" id="clear-wishes">清空愿望</button><button class="quiet-button" id="sign-out">退出当前设备</button>${wishTestMode ? '<button class="quiet-button" id="delete-account">删除账户（开发测试）</button>' : ''}<button class="quiet-button" data-action="home">开始新的搜索</button></section>`);
   const list = root.querySelector('#wish-list'); const summary = root.querySelector('#wish-summary');
   const identity = document.createElement('section'); identity.className = 'identity-panel';
   const identityTitle = document.createElement('h2'); identityTitle.textContent = '跨浏览器找回';
-  const identityHint = document.createElement('p'); identityHint.textContent = wishTestMode ? '开发测试情景不发送邮件。正式环境可先绑定邮箱，再在其他浏览器使用已有邮箱验证码登录。' : '已创建首条愿望后，可选绑定邮箱以跨浏览器找回；这不会阻断继续使用。已有邮箱登录严格禁止自动注册。';
+  const identityHint = document.createElement('p'); identityHint.textContent = wishTestMode ? '开发测试情景不发送邮件。' : '跨浏览器找回将在后续开放。';
   identity.append(identityTitle, identityHint);
-  if (!wishTestMode && authService) {
+  if (isDevelopment && !wishTestMode && authService) {
     const email = document.createElement('input'); email.type = 'email'; email.placeholder = '邮箱'; email.autocomplete = 'email';
     const token = document.createElement('input'); token.inputMode = 'numeric'; token.placeholder = '邮件验证码'; token.autocomplete = 'one-time-code';
     const message = document.createElement('p'); message.className = 'notice';
