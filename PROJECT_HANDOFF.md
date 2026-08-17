@@ -12,8 +12,8 @@
 | 默认分支 | `main` |
 | 阶段 1 验收提交 | `af3449ec26146bd42344df49165d06206ba4802d`（短提交号 `af3449e`） |
 | 公网诊断地址 | `https://zyrobbie.github.io/kanshan-wish-custodian/` |
-| 当前阶段 | 阶段 1–4 已完成；阶段 5 数据库/RPC 远程核心验收已通过、环境验收待进行；阶段 6 未开始 |
-| 当前交付物性质 | 阶段 1 在线诊断基线＋阶段 2 本地静态产品流程＋阶段 3 真实淘宝搜索＋阶段 4 真实知乎双层内容＋阶段 5 数据库/RPC 核心持久化；尚不是正式愿望持久化的最终 Demo |
+| 当前阶段 | 阶段 1–4 已完成；阶段 5 数据库/RPC 远程核心验收已通过、环境验收待进行；阶段 6 本地购物卡与提交版视觉已完成；阶段 7/8 未开始 |
+| 当前交付物性质 | 阶段 1 在线诊断基线＋阶段 2 本地静态产品流程＋阶段 3 真实淘宝搜索＋阶段 4 真实知乎双层内容＋阶段 5 数据库/RPC 核心持久化＋阶段 6 本地购物卡和提交版视觉；尚不是正式愿望持久化的最终 Demo |
 | 阶段 2 冻结代码基线 | `4c29383`（初始功能提交 `19998f7`） |
 | 阶段 3 冻结代码基线 | `8908331`（远程 `products-search` 活动版本 5） |
 | 阶段 4 冻结代码基线 | `07b6a4d`（远程 `zhihu-search` 活动版本 3） |
@@ -78,13 +78,15 @@ Supabase Edge Functions
    - 阶段 3 的最终验收依据；记录远程函数、真实淘宝接口和本地真实模式浏览器候选选择证据。
 5. `PHASE4_ACCEPTANCE.md`
    - 阶段 4 本地实现、远程函数、三类商品真实双层接口和浏览器验收的最终依据。
-6. `PROJECT_SPEC.md`
+6. `PHASE5_ACCEPTANCE.md` 与 `PHASE6_ACCEPTANCE.md`
+   - 阶段 5 远程数据库/RPC 核心事实与阶段 6 本地购物卡/视觉验收依据；两者都明确保留未验收环境项。
+7. `PROJECT_SPEC.md`
    - 产品范围、页面、状态机、数据模型、技术架构、测试方案、阶段路线和最终完成定义。
-7. `.env.example`
+8. `.env.example`
    - 环境变量名称和安全边界；只允许示例值，不能写入真实凭据。
-8. `.github/workflows/deploy-pages.yml`
+9. `.github/workflows/deploy-pages.yml`
    - `main` 分支自动构建和部署 GitHub Pages 的流程。
-9. `package.json`
+10. `package.json`
    - 本地启动、构建、静态控制检查和密钥扫描命令。
 
 ### 2.2 文档优先级
@@ -556,7 +558,7 @@ idle → product_searching → product_selecting
 
 退出条件：刷新、返回、重复点击、并发浏览器、迁移、删除和金额边界全部通过。
 
-当前记录：本地 Auth 服务、愿望 RPC 服务、服务端恢复逻辑、行为型开发测试情景、账户删除函数和 `PHASE5_SCHEMA_DRAFT.sql` 已提交；`PHASE5_ACCEPTANCE.md` 是最新验收依据。已实际应用 `20260817044635 phase5_wish_lifecycle` 与 `20260817045332 phase5_legacy_shape_compatibility`；`migrate-anonymous-wishes` v6 为 ACTIVE，`verify_jwt=true`。数据库/RPC、A/B RLS 隔离、直接 DML/TRUNCATE 撤销和 9 条阶段 1 旧记录保留已经通过。真实 OTP、正式 Pages 全流程、Cron、删除账户远程功能、跨浏览器和真实 WebView 仍等待独立验收。阶段 6 未开始。
+当前记录：本地 Auth 服务、愿望 RPC 服务、服务端恢复逻辑、行为型开发测试情景、账户删除函数和 `PHASE5_SCHEMA_DRAFT.sql` 已提交；`PHASE5_ACCEPTANCE.md` 是阶段 5 的最新验收依据。已实际应用 `20260817044635 phase5_wish_lifecycle` 与 `20260817045332 phase5_legacy_shape_compatibility`；`migrate-anonymous-wishes` v6 为 ACTIVE，`verify_jwt=true`。数据库/RPC、A/B RLS 隔离、直接 DML/TRUNCATE 撤销和 9 条阶段 1 旧记录保留已经通过。真实 OTP、正式 Pages 全流程、Cron、删除账户远程功能、跨浏览器和真实 WebView 仍等待独立验收。阶段 6 已完成本地购物卡与视觉收口，但不补足这些环境验收。
 
 ### 10.5 阶段 6：官方推广链接与购物卡
 
@@ -568,6 +570,8 @@ idle → product_searching → product_selecting
 - 商品一致、价格语义和结算页提示正确。
 
 退出条件：链接有效、落地商品一致、无效链接不进入候选、失败不伪造成功。
+
+当前记录：阶段 6 本地实现与浏览器开发情景验收见 `PHASE6_ACCEPTANCE.md`。购物卡只显示创建愿望时保存的快照和原样安全 `promotionUrl`；未执行外跳、未部署，也未调用外部接口。阶段 7/8 未开始。
 
 ### 10.6 阶段 7：视觉与浏览器矩阵
 
@@ -808,6 +812,7 @@ idle → product_searching → product_selecting
 - [ ] 接手方理解不能清理远端验收数据或重建项目；
 - [x] 阶段 2 已完成并冻结在 `4c29383`；阶段 3 已完成并冻结在 `8908331`；阶段 4 已完成并冻结在 `07b6a4d`。
 - [x] 阶段 5 数据库/RPC 核心验收已通过：两项 migration 已应用、`migrate-anonymous-wishes` v6 已部署，旧记录保留与 RLS 隔离已核对。
-- [ ] 阶段 5 真实 OTP、正式 Pages 流程、Cron、删除账户远程功能、跨浏览器和真实 WebView 仍未完成；阶段 6 未开始。
+- [x] 阶段 6 本地购物卡与提交版视觉已完成；购物卡使用保存链接且不自动外跳，见 `PHASE6_ACCEPTANCE.md`。
+- [ ] 阶段 5 真实 OTP、正式 Pages 流程、Cron、删除账户远程功能、跨浏览器和真实 WebView 仍未完成；阶段 7/8 未开始。
 
 完成以上确认后，新团队可以长期接管本项目。任何超出冻结范围的产品变化，应先形成书面变更说明、影响评估和新验收标准，再实施代码或基础设施变更。

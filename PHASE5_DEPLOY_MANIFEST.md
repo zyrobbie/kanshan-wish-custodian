@@ -8,6 +8,8 @@
 
 ## Edge Functions
 
+已部署的 `migrate-anonymous-wishes` 维持 `verify_jwt=true`（v6，ACTIVE）。
+
 | 函数 | 入口 | 完整本地依赖 | verify_jwt |
 |---|---|---|---|
 | `migrate-anonymous-wishes` | `supabase/functions/migrate-anonymous-wishes/index.ts` | 入口、`supabase/functions/_shared/http.ts` | `true`（v6，ACTIVE） |

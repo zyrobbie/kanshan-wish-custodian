@@ -14,6 +14,21 @@ export function approvedPromotionUrl(value) {
   const host = new URL(normalized).hostname.toLowerCase();
   return ['taobao.com', 'tmall.com', 'e.tb.cn'].some((domain) => host === domain || host.endsWith(`.${domain}`)) ? normalized : null;
 }
+/**
+ * Validates a previously saved promotion URL without rewriting it. The returned
+ * string is therefore safe to assign directly as the shopping card href and
+ * remains byte-for-byte the snapshot that created the wish.
+ */
+export function savedPromotionHref(value) {
+  if (typeof value !== 'string' || !value || value.trim() !== value || /[\u0000-\u001F\u007f]/.test(value)) return null;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'https:' || url.username || url.password) return null;
+    const host = url.hostname.toLowerCase();
+    const allowed = ['taobao.com', 'tmall.com', 'e.tb.cn'].some((domain) => host === domain || host.endsWith(`.${domain}`));
+    return allowed ? value : null;
+  } catch { return null; }
+}
 export function snapshotProduct(product) {
   if (!product || typeof product.itemId !== 'string' || !product.itemId.trim() || typeof product.title !== 'string' || !product.title.trim()) return null;
   const sellingPrice = money(product.price ?? product.sellingPrice);

@@ -4,7 +4,7 @@ const product = Object.freeze({ itemId: 'dev-item', title: '阶段 5 开发测�
 const evidence = Object.freeze({ expert: [], experience: [] });
 const key = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 
-export const wishTestNames = Object.freeze(['anonymous', 'sealed', 'expired', 'purchase', 'abandon', 'limit', 'duplicate-create', 'decision-race', 'pagination', 'bind-email', 'existing-email-login', 'migration', 'migration-error', 'otp-error', 'otp-expired', 'otp-rate-limited', 'delete-wish', 'clear-wishes', 'account-delete', 'refresh-restore']);
+export const wishTestNames = Object.freeze(['anonymous', 'sealed', 'expired', 'purchase', 'purchase-invalid-link', 'abandon', 'limit', 'duplicate-create', 'decision-race', 'pagination', 'bind-email', 'existing-email-login', 'migration', 'migration-error', 'otp-error', 'otp-expired', 'otp-rate-limited', 'delete-wish', 'clear-wishes', 'account-delete', 'refresh-restore']);
 
 function localAuth() {
   let user = { id: 'dev-anonymous-owner', is_anonymous: true, email_confirmed_at: null };
@@ -39,7 +39,14 @@ function createMigrationPair(now) {
 export function createWishTestHarness(name, now = Date.now()) {
   if (!wishTestNames.includes(name)) return null;
   const clock = { value: now };
-  const store = new DevelopmentWishStore({ now: () => clock.value });
+  // Fixed numeric seeds are used by unit tests. Browser development scenarios
+  // start from the current epoch and must advance with the visible countdown.
+  const realtimeClock = now > 1_000_000_000_000;
+  const currentTime = () => realtimeClock ? Math.max(Date.now(), clock.value) : clock.value;
+  // The refresh scenario reconstructs only from its persisted clock seed. It
+  // deliberately never stores wish content, yet yields the same absolute
+  // expiresAt after a reload; the visible countdown still uses real time.
+  const store = new DevelopmentWishStore({ now: name === 'refresh-restore' ? () => clock.value : currentTime });
   const auth = localAuth();
   let outcome = null;
   let accountDeleteConfirmed = false;
@@ -50,7 +57,7 @@ export function createWishTestHarness(name, now = Date.now()) {
     switch (name) {
       case 'anonymous': case 'sealed': { const wish = create(1); return { code: 'created', count: store.list().length, status: wish.status }; }
       case 'expired': { const wish = create(2); expire(wish); return { code: 'expired', status: store.list()[0].status }; }
-      case 'purchase': { const wish = create(3); expire(wish); return { code: 'decided', status: store.decide(wish.id, 'purchase').status, count: store.list().length }; }
+      case 'purchase': case 'purchase-invalid-link': { const wish = create(3); expire(wish); return { code: 'decided', status: store.decide(wish.id, 'purchase').status, count: store.list().length }; }
       case 'abandon': { const wish = create(4); expire(wish); return { code: 'decided', status: store.decide(wish.id, 'abandon').status, countedAmount: store.list()[0].countedAmount }; }
       case 'limit': { for (let n = 10; n < 15; n += 1) create(n); let code = 'unexpected'; try { create(15); } catch (error) { code = error.code; } return { code, count: store.list().length }; }
       case 'duplicate-create': { const first = create(20); const second = store.create({ product, evidence, duration: 24, idempotencyKey: key(20) }); return { code: 'duplicate_created_once', count: store.list().length, sameId: first.id === second.id }; }
@@ -58,8 +65,8 @@ export function createWishTestHarness(name, now = Date.now()) {
       case 'pagination': { for (let n = 30; n < 52; n += 1) completed(n); return { code: 'pagination_ready', count: store.list().length, firstPageCount: store.list().slice(0, 20).length, hasMore: store.list().length > 20 }; }
       case 'bind-email': { const result = await auth.bind('local@example.test'); return { code: 'bound', ownerUnchanged: result.ownerIdBefore === result.ownerIdAfter, anonymous: auth.user.is_anonymous }; }
       case 'existing-email-login': { const result = await auth.existingLogin('existing@example.test'); return { code: 'otp_requested', shouldCreateUser: result.shouldCreateUser }; }
-      case 'migration': { const pair = createMigrationPair(() => clock.value); pair.seed(); const first = pair.migrate(); const repeat = pair.migrate(); return { code: 'migrated', movedCount: first.movedCount, sourceCount: first.sourceCount, targetCount: first.targetCount, repeatMovedCount: repeat.movedCount }; }
-      case 'migration-error': { const pair = createMigrationPair(() => clock.value); pair.seed(); return pair.migrate({ fail: true }); }
+      case 'migration': { const pair = createMigrationPair(currentTime); pair.seed(); const first = pair.migrate(); const repeat = pair.migrate(); return { code: 'migrated', movedCount: first.movedCount, sourceCount: first.sourceCount, targetCount: first.targetCount, repeatMovedCount: repeat.movedCount }; }
+      case 'migration-error': { const pair = createMigrationPair(currentTime); pair.seed(); return pair.migrate({ fail: true }); }
       case 'otp-error': case 'otp-expired': case 'otp-rate-limited': return { code: name.replaceAll('-', '_'), retryable: true };
       case 'delete-wish': { const first = create(60); create(61); store.delete(first.id); return { code: 'deleted', count: store.list().length }; }
       case 'clear-wishes': { completed(70); const active = create(71, 48); store.clearCompleted(); const items = store.list(); return { code: 'completed_cleared', count: items.length, activePreserved: items[0]?.id === active.id, status: items[0]?.status }; }

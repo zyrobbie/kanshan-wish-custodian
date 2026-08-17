@@ -1,0 +1,54 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { kanshanCharacter } from '../src/app/kanshan-character.js';
+import { savedPromotionHref, WishStatuses } from '../src/app/wish-domain.js';
+import { shoppingCardSnapshot } from '../src/app/shopping-card.js';
+
+const promotion = 'https://s.click.taobao.com/keep-this-exact';
+const wish = Object.freeze({
+  id: 'wish-1',
+  status: WishStatuses.PURCHASED_INTENT,
+  product: Object.freeze({ itemId: '12345', title: '保存时的商品标题', imageUrl: 'https://img.alicdn.com/item.jpg', sellingPrice: 39.8, estimatedPrice: 29.8, promotionUrl: promotion }),
+});
+
+test('phase6 shopping card uses the exact stored promotion snapshot and never fabricates a replacement', () => {
+  const card = shoppingCardSnapshot(wish);
+  assert.equal(card.promotionHref, promotion);
+  assert.equal(card.itemId, wish.product.itemId);
+  assert.equal(card.title, wish.product.title);
+  assert.equal(card.imageUrl, wish.product.imageUrl);
+  assert.equal(card.sellingPrice, wish.product.sellingPrice);
+  assert.equal(card.estimatedPrice, wish.product.estimatedPrice);
+});
+
+test('phase6 shopping card rejects missing, unsafe, non-HTTPS and non-Taobao saved URLs', () => {
+  for (const value of [null, '', 'http://s.click.taobao.com/a', 'javascript:alert(1)', 'https://eviltaobao.com/a', 'https://taobao.com.evil.example/a', 'https://user@s.click.taobao.com/a', ' https://s.click.taobao.com/a', 'https://s.click.taobao.com/a\nnext']) {
+    assert.equal(savedPromotionHref(value), null, String(value));
+    assert.equal(shoppingCardSnapshot({ ...wish, product: { ...wish.product, promotionUrl: value } }).promotionHref, null, String(value));
+  }
+  assert.equal(savedPromotionHref('https://detail.tmall.com/item.htm?id=1'), 'https://detail.tmall.com/item.htm?id=1');
+  assert.equal(savedPromotionHref('https://e.tb.cn/h.example'), 'https://e.tb.cn/h.example');
+});
+
+test('phase6 character states are static presentation only and cannot mutate a wish lifecycle', () => {
+  const before = wish.status;
+  for (const state of ['welcome', 'guard', 'release']) {
+    const markup = kanshanCharacter(state);
+    assert.match(markup, new RegExp(`kanshan-${state}`));
+    assert.match(markup, /<svg/);
+  }
+  assert.equal(wish.status, before);
+});
+
+test('phase6 abandon accounting stays server-domain based: purchase intent is excluded and abandon is idempotent', async () => {
+  const { DevelopmentWishStore, summarizeWishes } = await import('../src/app/wish-domain.js');
+  let now = 0;
+  const store = new DevelopmentWishStore({ now: () => now });
+  const make = (id) => store.create({ product: { itemId: id, title: id, price: 40, finalPrice: 30, promotionUrl: promotion }, evidence: { expert: [], experience: [] }, duration: 24, idempotencyKey: `00000000-0000-4000-8000-${id.padStart(12, '0')}` });
+  const purchase = make('1'); const abandon = make('2'); now = 25_000;
+  store.decide(purchase.id, 'purchase'); store.decide(abandon.id, 'abandon'); store.decide(abandon.id, 'abandon');
+  const summary = summarizeWishes(store.list());
+  assert.equal(summary.purchaseIntentCount, 1);
+  assert.equal(summary.abandonedCount, 1);
+  assert.equal(summary.abandonedListedAmount, 30);
+});
