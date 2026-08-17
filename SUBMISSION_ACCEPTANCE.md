@@ -10,6 +10,7 @@
 - 发布前复验发现正式应用分别创建商品、知乎与身份客户端时会产生多个 GoTrueClient 警告。现由 `production-services.js` 只创建一个共享 client，并注入商品搜索、知乎证据、身份与愿望服务；匿名会话与后续服务调用继续共用同一身份上下文。本地 fixture 与各类开发测试情景仍不创建该正式服务组合。
 - 购物卡、愿望状态、金额统计与链接安全边界保持不变：只使用愿望快照中的安全官方推广链接，不重搜、不转链、不自动外跳。
 - GitHub Pages 工作流名称已更新为正式产品名称；构建时固定使用 `/kanshan-wish-custodian/` 子路径，公开 Supabase 配置仍只从 GitHub Environment Variables 注入。
+- 阶段 1 的 `diagnostic.html`、`src/main.js`、`src/style.css` 和历史验收证据继续保留在仓库。默认正式构建与 GitHub Pages 工件只生成产品应用；只有本地显式 `VITE_INCLUDE_DIAGNOSTIC=1 npm run build` 才会生成诊断页。这是发布产物隔离，不是否定阶段 1 的历史验收。
 
 ## 静态检查
 
@@ -18,6 +19,7 @@
 - `npm run build`：通过。
 - `VITE_BASE_PATH=/kanshan-wish-custodian/ npm run build`：通过；构建产物使用该子路径，未发现错误的根路径首页资源引用。
 - `git diff --check`：通过。
+- 发布产物检查：默认 `dist` 不含 `diagnostic.html`、阶段 1 诊断标题、邮箱 OTP、淘宝/知乎真实冒烟或 RLS 诊断入口；若这些内容进入默认 `dist`，`npm run check` 会失败。
 - 源码与构建产物密钥扫描：均通过；未发现 Secret、App Secret、service-role、SMTP 密码或 Access Secret。
 
 ## 外部接口验证

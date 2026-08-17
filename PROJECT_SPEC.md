@@ -94,7 +94,7 @@ Demo 不替用户判断“该不该买”，也不以高佣商品诱导购买。
 
 | 阶段 | 状态 | 当前边界 |
 |---|---|---|
-| 阶段 1：部署与身份持久化 | 已完成 | 证据冻结在 `PHASE1_ACCEPTANCE.md`，诊断能力保留在 `diagnostic.html` |
+| 阶段 1：部署与身份持久化 | 已完成 | 证据冻结在 `PHASE1_ACCEPTANCE.md`；诊断源码保留在 `diagnostic.html`，但不进入正式 Pages 产物 |
 | 阶段 2：静态产品流程 | 已完成 | 验收证据见 `PHASE2_ACCEPTANCE.md`；冻结代码基线为 `4c29383`；仅本地 fixture、状态机与浏览器结构验收，不调用外部业务接口、不部署 |
 | 阶段 3：淘联真实商品搜索 | 已完成 | 验收证据见 `PHASE3_ACCEPTANCE.md`；冻结代码基线为 `8908331`；远程函数、真实接口与本地真实模式浏览器候选选择均已通过 |
 | 阶段 4：知乎双层内容 | 已完成 | 证据见 `PHASE4_ACCEPTANCE.md`；冻结代码基线为 `07b6a4d`；远程函数、三类商品真实双层接口与本地真实模式浏览器流程均已通过 |
@@ -1132,7 +1132,7 @@ Supabase SDK 可以在浏览器保存标准登录会话；`localStorage` 仍不�
 - 验证淘宝、知乎请求能从 Edge Functions 发出，且密钥不出现在前端；验证官方推广链接在当前标签页的受限落地；
 - 验证正式邮件服务能向非项目成员邮箱送达验证码。
 
-状态：**已完成**。验收证据见 `PHASE1_ACCEPTANCE.md`；阶段 1 诊断页保留为 `diagnostic.html`。
+状态：**已完成**。验收证据见 `PHASE1_ACCEPTANCE.md`；阶段 1 诊断源码保留为 `diagnostic.html`，仅可通过 `VITE_INCLUDE_DIAGNOSTIC=1` 本地 opt-in 构建，不作为正式 Pages 页面发布。
 
 ### 阶段 2：项目骨架与静态流程
 

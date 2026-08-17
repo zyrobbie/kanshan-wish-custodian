@@ -15,8 +15,9 @@
     "check:phase4": "node scripts/verify-phase4-static.mjs",
     "check:phase5": "node scripts/verify-phase5-static.mjs",
     "check:phase6": "node scripts/verify-phase6-static.mjs",
+    "check:release-artifact": "node scripts/verify-release-artifact.mjs",
     "check:dist-secrets": "node scripts/scan-dist-secrets.mjs",
-    "check": "npm run check:secrets && npm test && npm run check:phase1 && npm run check:phase2 && npm run check:phase3 && npm run check:phase4 && npm run check:phase5 && npm run check:phase6 && npm run build && npm run check:dist-secrets"
+    "check": "npm run check:secrets && npm test && npm run check:phase1 && npm run check:phase2 && npm run check:phase3 && npm run check:phase4 && npm run check:phase5 && npm run check:phase6 && npm run build && npm run check:release-artifact && npm run check:dist-secrets"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4"
