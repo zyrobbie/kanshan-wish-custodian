@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { kanshanCharacter } from '../src/app/kanshan-character.js';
+import { readFileSync } from 'node:fs';
 import { savedPromotionHref, WishStatuses } from '../src/app/wish-domain.js';
 import { shoppingCardSnapshot } from '../src/app/shopping-card.js';
 
@@ -30,13 +30,12 @@ test('phase6 shopping card rejects missing, unsafe, non-HTTPS and non-Taobao sav
   assert.equal(savedPromotionHref('https://e.tb.cn/h.example'), 'https://e.tb.cn/h.example');
 });
 
-test('phase6 character states are static presentation only and cannot mutate a wish lifecycle', () => {
+test('phase6 Liu Kanshan presentation states are static and cannot mutate a wish lifecycle', () => {
   const before = wish.status;
-  for (const state of ['welcome', 'guard', 'release']) {
-    const markup = kanshanCharacter(state);
-    assert.match(markup, new RegExp(`kanshan-${state}`));
-    assert.match(markup, /<svg/);
-  }
+  const main = readFileSync(new URL('../src/app/main.js', import.meta.url), 'utf8');
+  assert.match(main, /liu-kanshan-wave-transparent\.png/);
+  for (const state of ['welcome', 'guard', 'release']) assert.match(main, new RegExp(`liuKanshan\\('${state}'\\)`));
+  assert.doesNotMatch(main, /kanshanCharacter|kanshan-character/);
   assert.equal(wish.status, before);
 });
 
