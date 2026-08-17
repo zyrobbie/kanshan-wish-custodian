@@ -33,8 +33,12 @@ test('phase6 shopping card rejects missing, unsafe, non-HTTPS and non-Taobao sav
 test('phase6 Liu Kanshan presentation states are static and cannot mutate a wish lifecycle', () => {
   const before = wish.status;
   const main = readFileSync(new URL('../src/app/main.js', import.meta.url), 'utf8');
+  assert.match(main, /home-reference-original\.png/);
+  assert.match(main, /import\.meta\.env\.BASE_URL/);
   assert.match(main, /liu-kanshan-wave-transparent\.png/);
-  for (const state of ['welcome', 'guard', 'release']) assert.match(main, new RegExp(`liuKanshan\\('${state}'\\)`));
+  // The welcome pose is part of the user-approved homepage artwork. Guard and
+  // release remain live presentation states on later pages.
+  for (const state of ['guard', 'release']) assert.match(main, new RegExp(`liuKanshan\\('${state}'\\)`));
   assert.doesNotMatch(main, /kanshanCharacter|kanshan-character/);
   assert.equal(wish.status, before);
 });
