@@ -1,5 +1,5 @@
 import { cors, json, requireAllowedOrigin } from "../_shared/http.ts";
-import { buildZhihuQueries, providerErrorCode, selectEvidence } from "../_shared/zhihu-evidence.js";
+import { buildZhihuQueries, compressEvidenceBatch, finalizeEvidenceSummaries, providerErrorCode, selectEvidence } from "../_shared/zhihu-evidence.js";
 
 const endpoint = "https://developer.zhihu.com/api/v1/content/zhihu_search";
 const layerNames = ["expert", "experience"] as const;
@@ -13,6 +13,7 @@ const log = (payload: Record<string, unknown>) => console.log(JSON.stringify({
   experience_status: payload.experience_status ?? "error",
   expert_count: payload.expert_count ?? 0,
   experience_count: payload.experience_count ?? 0,
+  summary_status: payload.summary_status ?? "fallback",
   duration_ms: payload.duration_ms ?? 0,
 }));
 
@@ -95,7 +96,19 @@ Deno.serve(async (request) => {
       log({ ok: false, category, expert_status: "error", experience_status: "error", duration_ms: Date.now() - startedAt });
       return json({ ok: false, error: category }, category === "provider_timeout" ? 504 : 502, origin);
     }
-    log({ ok: true, category: "success", expert_status: layers.expert.status, experience_status: layers.experience.status, expert_count: expertCount, experience_count: experienceCount, duration_ms: Date.now() - startedAt });
+    const selected = [...layers.expert.items, ...layers.experience.items];
+    let summaries: Map<string, string> | null = null;
+    let summaryStatus = "fallback";
+    try {
+      summaries = await compressEvidenceBatch(selected, secret);
+      summaryStatus = summaries ? "zhida" : "fallback";
+    } catch {
+      // Zhida is an optional rendering enhancement. Its failures must never
+      // turn already-retrieved Zhihu evidence into a page-level failure.
+      summaryStatus = "fallback";
+    }
+    for (const layer of layerNames) layers[layer].items = finalizeEvidenceSummaries(layers[layer].items, summaries);
+    log({ ok: true, category: "success", expert_status: layers.expert.status, experience_status: layers.experience.status, expert_count: expertCount, experience_count: experienceCount, summary_status: summaryStatus, duration_ms: Date.now() - startedAt });
     return json({ ok: true, coreProductName: queries.coreProductName, layers, fetchedAt: new Date().toISOString() }, 200, origin);
   } catch {
     log({ ok: false, category: "request_failed", duration_ms: Date.now() - startedAt });

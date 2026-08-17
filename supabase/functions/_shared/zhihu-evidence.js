@@ -22,6 +22,18 @@ export function truncateUnicode(value, max = 280) {
   return characters.length <= max ? characters.join('') : `${characters.slice(0, max).join('')}…`;
 }
 
+/** Hard character limit used for the public evidence cards. Unlike the older
+ * generic truncator it never adds an ellipsis beyond the requested maximum. */
+export function limitUnicode(value, max = 50) {
+  return Array.from(plainText(value)).slice(0, max).join('');
+}
+
+export function fallbackEvidenceSummary(value) {
+  const text = plainText(value);
+  const firstSentence = text.match(/^(.{1,200}?[。！？!?；;])/u)?.[1] ?? text;
+  return limitUnicode(firstSentence, 50);
+}
+
 export function cleanProductTitle(value) {
   const original = plainText(value);
   if (!original) return '';
@@ -65,7 +77,8 @@ export function mapZhihuItem(raw, layer) {
   if (!raw || typeof raw !== 'object' || (layer !== 'expert' && layer !== 'experience')) return null;
   const item = raw;
   const title = truncateUnicode(item.Title, 180);
-  const summary = truncateUnicode(item.ContentText, 280);
+  const sourceText = truncateUnicode(item.ContentText, 1600);
+  const summary = sourceText;
   const url = safeZhihuUrl(item.Url);
   if (!title || !summary || !url) return null;
   const authorName = truncateUnicode(item.AuthorName || '知乎用户', 80) || '知乎用户';
@@ -80,6 +93,7 @@ export function mapZhihuItem(raw, layer) {
     authorBadgeText: badge || null,
     contentType,
     summary,
+    sourceText,
     url,
     voteUpCount: nonNegative(item.VoteUpCount),
     authorityLevel: plainText(item.AuthorityLevel) || null,
@@ -117,6 +131,60 @@ export function selectEvidence(rawItems, layer, coreProductName, used = new Set(
     .map(({ _score, ...item }) => item);
   candidates.forEach((item) => { used.add(item.id); used.add(item.url); });
   return candidates;
+}
+
+function responseContent(body) {
+  const content = body?.choices?.[0]?.message?.content;
+  if (typeof content !== 'string') return null;
+  try { return JSON.parse(content); } catch { return null; }
+}
+
+export function validateZhidaSummaries(value, items) {
+  const mapping = value && typeof value === 'object' && !Array.isArray(value)
+    ? (value.summaries && typeof value.summaries === 'object' && !Array.isArray(value.summaries) ? value.summaries : value)
+    : null;
+  if (!mapping) return null;
+  const summaries = new Map();
+  for (const item of items) {
+    const summary = mapping[item.id];
+    if (typeof summary !== 'string' || !plainText(summary) || Array.from(summary).length > 50) return null;
+    summaries.set(item.id, summary);
+  }
+  return summaries;
+}
+
+/** One Zhida request compresses the selected evidence batch. The function
+ * receives only already-selected items and does not log their content. */
+export async function compressEvidenceBatch(items, secret, { fetchImpl = fetch } = {}) {
+  const batch = Array.isArray(items) ? items.slice(0, 6) : [];
+  if (!batch.length) return null;
+  const payload = batch.map((item) => ({ id: item.id, content: item.sourceText ?? item.summary }));
+  const response = await fetchImpl('https://developer.zhihu.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${secret}`,
+      'x-request-timestamp': String(Math.floor(Date.now() / 1000)),
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'zhida-fast-1p5', stream: false,
+      messages: [{ role: 'system', content: '只依据给定原文压缩，不补充事实。仅输出严格 JSON：{"内容ID":"不超过50个Unicode字符的摘要"}。' }, { role: 'user', content: JSON.stringify(payload) }],
+    }),
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!response.ok) throw Object.assign(new Error('zhida failed'), { stableCode: providerErrorCode({ status: response.status }) });
+  let body = null;
+  try { body = await response.json(); } catch { /* handled as invalid output */ }
+  const summaries = validateZhidaSummaries(responseContent(body), batch);
+  if (!summaries) throw Object.assign(new Error('zhida invalid'), { stableCode: 'invalid_response' });
+  return summaries;
+}
+
+export function finalizeEvidenceSummaries(items, summaries = null) {
+  return (Array.isArray(items) ? items : []).map(({ sourceText, summary, ...item }) => ({
+    ...item,
+    summary: limitUnicode(summaries?.get(item.id) ?? fallbackEvidenceSummary(sourceText ?? summary), 50),
+  }));
 }
 
 export function providerErrorCode({ status, code, name } = {}) {

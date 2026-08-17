@@ -4,14 +4,14 @@ import { DemoDurations, remainingSeconds } from './timing.js';
 import { abandonedTotal, displayPrice, plannedSpend } from './pricing.js';
 import { FixtureRepository } from './repository.js';
 import { AsyncTaskGate } from './async-task.js';
-import { Views, openWishFlow } from './navigation.js';
+import { Views, clearWishRoute, routeWishId, setWishRoute } from './navigation.js';
 import { normalizeClientQuery, productPriceText, safeClientUrl } from './products-service.js';
 import { ProductTestService, productTestName } from './product-test-scenarios.js';
 import { ZhihuEvidenceError } from './zhihu-service.js';
 import { EvidenceTestService, evidenceTestName } from './evidence-test-scenarios.js';
 import { createProductionServices } from './production-services.js';
 import { createWishTestHarness, wishTestNames } from './wish-test-scenarios.js';
-import { expiryFromServer, groupWishes, summarizeWishes, WishStatuses } from './wish-domain.js';
+import { expiryFromServer, formalWishes, groupWishes, summarizeWishes, WishStatuses } from './wish-domain.js';
 import { RecoveryTriggers, recoveryPlan } from './wish-recovery.js';
 import { shoppingCardSnapshot } from './shopping-card.js';
 
@@ -35,11 +35,13 @@ const wishScenario = (() => {
   return createWishTestHarness(wishTest, seed);
 })();
 const repository = new FixtureRepository({ mode: fixtureMode ? 'development' : 'production', storage: fixtureMode ? window.sessionStorage : null });
-const localWishFlow = wishTestMode && !productTestMode;
 const localTestMode = fixtureMode || productTestMode || evidenceTestMode || wishTestMode;
 const productionServices = localTestMode ? null : createProductionServices({ url: import.meta.env.VITE_SUPABASE_URL, publishableKey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY });
-const productService = fixtureMode ? null : productTestMode ? new ProductTestService(productTest) : localWishFlow ? new ProductTestService('wish-success') : productionServices.productService;
-const evidenceService = fixtureMode ? null : evidenceTestMode ? new EvidenceTestService(evidenceTest) : localWishFlow ? new EvidenceTestService('both') : productionServices.evidenceService;
+// Any explicit development scenario remains fully local. Supplying only one
+// of productTest/evidenceTest must not accidentally dereference production
+// services or make the other stage call an external provider.
+const productService = fixtureMode ? null : productTestMode ? new ProductTestService(productTest) : localTestMode ? new ProductTestService(wishTestMode ? 'wish-success' : 'success') : productionServices.productService;
+const evidenceService = fixtureMode ? null : evidenceTestMode ? new EvidenceTestService(evidenceTest) : localTestMode ? new EvidenceTestService('both') : productionServices.evidenceService;
 const authService = productionServices?.authService ?? null;
 const wishesService = productionServices?.wishesService ?? null;
 let flow = fixtureMode ? repository.getFlow() : { state: States.IDLE };
@@ -223,7 +225,7 @@ function renderEvidence() {
 
 function normalizeWish(record) {
   if (!record) return null;
-  return { id: record.id, product: record.product, evidence: record.evidence, custodyHours: record.custodyHours ?? record.custody_hours, demoDurationSeconds: record.demoDurationSeconds ?? record.demo_duration_seconds, createdAt: record.createdAt ?? record.created_at, expiresAt: record.expiresAt ?? record.expires_at, status: record.status, decisionAt: record.decisionAt ?? record.decision_at, countedAmount: Number(record.countedAmount ?? record.counted_amount ?? 0), updatedAt: record.updatedAt ?? record.updated_at };
+  return { id: record.id, product: record.product, evidence: record.evidence, custodyHours: record.custodyHours ?? record.custody_hours, demoDurationSeconds: record.demoDurationSeconds ?? record.demo_duration_seconds, createdAt: record.createdAt ?? record.created_at, expiresAt: record.expiresAt ?? record.expires_at, status: record.status, decisionAt: record.decisionAt ?? record.decision_at, countedAmount: Number(record.countedAmount ?? record.counted_amount ?? 0), updatedAt: record.updatedAt ?? record.updated_at, idempotencyKey: record.idempotencyKey ?? record.idempotency_key ?? null };
 }
 async function createCustody(duration, button) {
   button.disabled = true;
@@ -233,6 +235,7 @@ async function createCustody(duration, button) {
     else if (wishTestMode) record = wishScenario.store.create({ product: flow.product, evidence: flow.evidence, duration, idempotencyKey: crypto.randomUUID() });
     else record = await wishesService.create({ product: flow.product, evidence: flow.evidence, duration });
     flow = { ...flow, record: normalizeWish(record), recordId: record.id, state: States.SEALED };
+    if (!fixtureMode && !wishTestMode) setWishRoute(record.id);
     if (fixtureMode) repository.saveFlow(flow); render();
   } catch (error) { flow = { ...flow, error: error instanceof Error ? error.message : '愿望创建失败。', state: States.ERROR }; render(); }
 }
@@ -277,13 +280,22 @@ async function getTimeline() {
   if (fixtureMode) return repository.list().map(normalizeWish);
   if (wishTestMode) return wishScenario.store.list();
   const all = []; let offset = 0; let page;
-  do { page = await wishesService.list({ offset }); all.push(...page.items.map((row) => normalizeWish(row.wish ?? row))); offset = page.nextOffset; } while (page.hasMore && Number.isInteger(offset));
+  do { page = await wishesService.list({ offset }); all.push(...formalWishes(page.items.map((row) => normalizeWish(row.wish ?? row)))); offset = page.nextOffset; } while (page.hasMore && Number.isInteger(offset));
   return all;
 }
 async function getWishPage(offset = 0) {
   if (fixtureMode) { const items = repository.list().map(normalizeWish); return { items: items.slice(offset, offset + 20), nextOffset: offset + 20 < items.length ? offset + 20 : null, hasMore: offset + 20 < items.length, summary: summarizeWishes(items) }; }
   if (wishTestMode) { const items = wishScenario.store.list(); return { items: items.slice(offset, offset + 20), nextOffset: offset + 20 < items.length ? offset + 20 : null, hasMore: offset + 20 < items.length, summary: summarizeWishes(items) }; }
-  const page = await wishesService.list({ offset }); return { ...page, items: page.items.map((row) => normalizeWish(row.wish ?? row)) };
+  const page = await wishesService.list({ offset });
+  const sourceItems = page.items.map((row) => normalizeWish(row.wish ?? row));
+  const items = formalWishes(sourceItems);
+  // The migration is authoritative; this defensive branch prevents old phase 1
+  // records from leaking into the UI or its totals before every client reloads.
+  // Do not trust an old server response to keep legacy Phase 1 rows out of
+  // the visible counters. The hotfix migration applies the same condition on
+  // the authoritative RPC, while this client-side calculation is a second
+  // boundary for already-open production clients during rollout.
+  return { ...page, items, summary: summarizeWishes(items) };
 }
 function appendWishRow(list, wish) {
   const row = document.createElement('article'); row.className = 'wish-row';
@@ -291,9 +303,9 @@ function appendWishRow(list, wish) {
   const title = document.createElement('strong'); title.textContent = wish.product?.title ?? '未命名商品';
   const price = document.createElement('span'); price.textContent = displayPrice(wish.product?.estimatedPrice ?? wish.product?.sellingPrice);
   row.append(status, title, price);
-  if (wish.status === WishStatuses.SEALED) { const open = document.createElement('button'); open.className = 'secondary'; open.setAttribute('data-open-wish', wish.id); open.textContent = '恢复保管'; open.addEventListener('click', () => { invalidateTasks(); flow = { state: States.SEALED, record: wish, recordId: wish.id }; view = Views.FLOW; render(); }); row.append(open); }
-  if (wish.status === WishStatuses.EXPIRED) { const open = document.createElement('button'); open.className = 'secondary'; open.textContent = '现在决定'; open.addEventListener('click', () => { flow = { state: States.EXPIRED, record: wish, recordId: wish.id }; view = Views.FLOW; render(); }); row.append(open); }
-  if (wish.status === WishStatuses.PURCHASED_INTENT || wish.status === WishStatuses.ABANDONED) { const open = document.createElement('button'); open.className = 'secondary'; open.textContent = wish.status === WishStatuses.PURCHASED_INTENT ? '查看购物卡' : '查看记录'; open.addEventListener('click', () => { flow = { state: wish.status === WishStatuses.PURCHASED_INTENT ? States.PURCHASE_READY : States.ABANDONED, record: wish, recordId: wish.id }; view = Views.FLOW; render(); }); row.append(open); }
+  if (wish.status === WishStatuses.SEALED) { const open = document.createElement('button'); open.className = 'secondary'; open.setAttribute('data-open-wish', wish.id); open.textContent = '恢复保管'; open.addEventListener('click', () => { invalidateTasks(); setWishRoute(wish.id); flow = { state: States.SEALED, record: wish, recordId: wish.id }; view = Views.FLOW; render(); }); row.append(open); }
+  if (wish.status === WishStatuses.EXPIRED) { const open = document.createElement('button'); open.className = 'secondary'; open.textContent = '现在决定'; open.addEventListener('click', () => { setWishRoute(wish.id); flow = { state: States.EXPIRED, record: wish, recordId: wish.id }; view = Views.FLOW; render(); }); row.append(open); }
+  if (wish.status === WishStatuses.PURCHASED_INTENT || wish.status === WishStatuses.ABANDONED) { const open = document.createElement('button'); open.className = 'secondary'; open.textContent = wish.status === WishStatuses.PURCHASED_INTENT ? '查看购物卡' : '查看记录'; open.addEventListener('click', () => { setWishRoute(wish.id); flow = { state: wish.status === WishStatuses.PURCHASED_INTENT ? States.PURCHASE_READY : States.ABANDONED, record: wish, recordId: wish.id }; view = Views.FLOW; render(); }); row.append(open); }
   const remove = document.createElement('button'); remove.className = 'quiet-button'; remove.textContent = '删除'; remove.addEventListener('click', async () => {
     if (!window.confirm('确定删除这条愿望吗？此操作不可恢复。')) return;
     try { if (fixtureMode) repository.state?.delete?.(wish.id); else if (wishTestMode) wishScenario.store.delete(wish.id); else await wishesService.remove(wish.id); renderWishes(); }
@@ -353,9 +365,13 @@ function renderWishes() {
 }
 function renderError() { const label = fixtureMode ? '开发测试错误状态' : productTestMode || evidenceTestMode ? `开发测试情景 · ${evidenceTest ?? productTest}` : flow.failedStage === 'evidence' ? '知乎证据未完成' : '商品搜索未完成'; shell(`<section class="error-state"><p class="eyebrow">${label}</p><h1>这一步不能继续</h1><p>${escape(flow.error ?? '发生了未分类错误。')}</p><button class="primary" data-action="home">返回首页</button></section>`); }
 
-function handleAction(event) { event.preventDefault(); const action = event.currentTarget.dataset.action; if (action === 'home') { invalidateTasks(); view = Views.FLOW; if (fixtureMode) repository.clearFlow(); flow = fixtureMode ? repository.getFlow() : { state: States.IDLE }; render(); } if (action === 'wishes') { invalidateTasks(); view = Views.WISHES; render(); } if (action === 'products') { invalidateTasks(); view = Views.FLOW; save(States.PRODUCT_SELECTING); } if (action === 'custody') { view = Views.FLOW; save(States.CUSTODY_CONFIG); } }
+function handleAction(event) { event.preventDefault(); const action = event.currentTarget.dataset.action; if (action === 'home') { invalidateTasks(); clearWishRoute(); view = Views.FLOW; if (fixtureMode) repository.clearFlow(); flow = fixtureMode ? repository.getFlow() : { state: States.IDLE }; render(); } if (action === 'wishes') { invalidateTasks(); clearWishRoute(); view = Views.WISHES; render(); } if (action === 'products') { invalidateTasks(); clearWishRoute(); view = Views.FLOW; save(States.PRODUCT_SELECTING); } if (action === 'custody') { view = Views.FLOW; save(States.CUSTODY_CONFIG); } }
 async function recover(trigger = RecoveryTriggers.INITIAL_LOAD) {
   if (recoveryInFlight || fixtureMode || productTestMode) return;
+  const intendedWishId = routeWishId();
+  // Opening the project root is intentionally not a request to inspect saved
+  // wishes. It must remain on the homepage even for accounts with history.
+  if (trigger === RecoveryTriggers.INITIAL_LOAD && !intendedWishId) return;
   recoveryInFlight = true;
   try {
     if (wishTestMode) {
@@ -368,6 +384,7 @@ async function recover(trigger = RecoveryTriggers.INITIAL_LOAD) {
       currentView: view,
       currentState: flow.state,
       currentRecordId: flow.recordId ?? flow.record?.id ?? null,
+      routeWishId: intendedWishId,
       wishes: await getTimeline(),
     });
     if (plan.action === 'replace_view') {

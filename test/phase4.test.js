@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  buildZhihuQueries, cleanProductTitle, mapZhihuItem, plainText, providerErrorCode,
-  safeZhihuUrl, selectEvidence, truncateUnicode,
+  buildZhihuQueries, cleanProductTitle, compressEvidenceBatch, fallbackEvidenceSummary, finalizeEvidenceSummaries,
+  mapZhihuItem, plainText, providerErrorCode, safeZhihuUrl, selectEvidence, truncateUnicode,
 } from '../supabase/functions/_shared/zhihu-evidence.js';
 import { EvidenceTestService, evidenceTestName } from '../src/app/evidence-test-scenarios.js';
 import { extractZhihuErrorCode, normalizeEvidencePayload, ZhihuEvidenceError, ZhihuEvidenceService } from '../src/app/zhihu-service.js';
@@ -54,11 +54,30 @@ test('provider failures use only stable Zhihu categories', () => {
   assert.equal(providerErrorCode({ name: 'TimeoutError' }), 'provider_timeout');
 });
 
+test('Zhida batch summaries are strict, limited to six, and failures fall back to 50 Unicode characters', async () => {
+  const selected = Array.from({ length: 7 }, (_, index) => ({ ...mapZhihuItem(item({ ContentID: String(index), ContentText: `第${index}条内容。${'长文本'.repeat(40)}` }), 'expert'), id: String(index) }));
+  let request;
+  const summaries = await compressEvidenceBatch(selected, 'secret-never-logged', { fetchImpl: async (_url, init) => {
+    request = JSON.parse(init.body);
+    return { ok: true, json: async () => ({ choices: [{ message: { content: JSON.stringify(Object.fromEntries(selected.slice(0,6).map((entry) => [entry.id, `摘要${entry.id}`]))) } }] }) };
+  } });
+  assert.equal(request.model, 'zhida-fast-1p5'); assert.equal(JSON.parse(request.messages[1].content).length, 6);
+  const final = finalizeEvidenceSummaries(selected.slice(0,6), summaries);
+  assert.ok(final.every((entry) => Array.from(entry.summary).length <= 50));
+  assert.equal(final[0].sourceText, undefined);
+  await assert.rejects(() => compressEvidenceBatch(selected.slice(0,1), 'x', { fetchImpl: async () => ({ ok: false, status: 504, json: async () => ({}) }) }));
+  await assert.rejects(() => compressEvidenceBatch(selected.slice(0,1), 'x', { fetchImpl: async () => ({ ok: true, json: async () => ({ choices: [{ message: { content: '{bad json}' } }] }) }) }));
+  await assert.rejects(() => compressEvidenceBatch(selected.slice(0,1), 'x', { fetchImpl: async () => ({ ok: true, json: async () => ({ choices: [{ message: { content: JSON.stringify({ 0: 'x'.repeat(51) }) } }] }) }) }));
+  assert.ok(Array.from(fallbackEvidenceSummary('第一句很长。第二句')).length <= 50);
+});
+
 test('frontend accepts only a complete stable evidence payload', () => {
   const ready = { ok: true, coreProductName: '咖啡机', fetchedAt: 'x', layers: { expert: { status: 'ready', items: [mapZhihuItem(item(), 'expert')] }, experience: { status: 'empty', items: [] } } };
   assert.equal(normalizeEvidencePayload(ready).layers.expert.items.length, 1);
   assert.throws(() => normalizeEvidencePayload({ ok: true, coreProductName: 'x', layers: {} }), ZhihuEvidenceError);
   assert.throws(() => normalizeEvidencePayload({ ok: true, coreProductName: 'x', layers: { expert: { status: 'ready', items: [] }, experience: { status: 'bad', items: [] } } }), ZhihuEvidenceError);
+  const oversized = normalizeEvidencePayload({ ...ready, layers: { expert: { status: 'ready', items: [{ ...mapZhihuItem(item(), 'expert'), summary: '😀'.repeat(80) }] }, experience: { status: 'empty', items: [] } } });
+  assert.ok(Array.from(oversized.layers.expert.items[0].summary).length <= 50);
 });
 
 test('FunctionsHttpError contexts and network failures never leak raw provider data', async () => {

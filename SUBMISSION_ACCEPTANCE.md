@@ -11,10 +11,13 @@
 - 购物卡、愿望状态、金额统计与链接安全边界保持不变：只使用愿望快照中的安全官方推广链接，不重搜、不转链、不自动外跳。
 - GitHub Pages 工作流名称已更新为正式产品名称；构建时固定使用 `/kanshan-wish-custodian/` 子路径，公开 Supabase 配置仍只从 GitHub Environment Variables 注入。
 - 阶段 1 的 `diagnostic.html`、`src/main.js`、`src/style.css` 和历史验收证据继续保留在仓库。默认正式构建与 GitHub Pages 工件只生成产品应用；只有本地显式 `VITE_INCLUDE_DIAGNOSTIC=1 npm run build` 才会生成诊断页。这是发布产物隔离，不是否定阶段 1 的历史验收。
+- 发布后发现的愿望隔离热修复现已在本地分支准备：以 `idempotency_key is not null` 识别阶段 5/6 正式愿望，列表、分页、统计、活动上限与正式生命周期操作均排除阶段 1 历史记录。配套迁移只替换 RPC 定义，不删除或改写任何已有记录；尚未应用到远程。
+- 根地址不再因任何历史愿望自动跳转；只有用户主动进入“我的愿望”，或带有由正式愿望页创建的明确愿望路由时，才会读取并恢复相应的正式愿望与原始 `expiresAt`。
+- 知乎证据仍保留专业解读/真实体验两层检索。选中的最多 6 条内容会由一次 `zhida-fast-1p5` 批量压缩为按内容 ID 对应、每条不超过 50 个 Unicode 字符的摘要；失败时安全回退为原文句子截取，不影响证据页。该新增调用本轮未执行真实验收。
 
 ## 静态检查
 
-- `npm test`：57/57 通过（新增正式服务组合只初始化一个 Supabase client 的断言）。
+- `npm test`：59/59 通过（包括正式愿望隔离、根路由恢复、RPC 错误字段映射、非法价格与 Zhida 批量摘要回退断言）。
 - `npm run check`：通过，包括阶段 1–6 静态控制、测试、构建和构建产物扫描。
 - `npm run build`：通过。
 - `VITE_BASE_PATH=/kanshan-wish-custodian/ npm run build`：通过；构建产物使用该子路径，未发现错误的根路径首页资源引用。

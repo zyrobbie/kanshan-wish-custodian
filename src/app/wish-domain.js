@@ -5,6 +5,15 @@ const clone = (value) => structuredClone(value);
 const money = (value) => Number.isFinite(value) && value >= 0 ? Math.round(value * 100) / 100 : null;
 
 export function validDuration(value) { return DemoDurations.includes(Number(value)); }
+/** Stage 5/6 custody rows are deliberately marked by the server-issued key.
+ * Stage 1 diagnostics never had this marker and must not join the product UI. */
+export function isFormalWish(wish) {
+  const key = wish?.idempotencyKey ?? wish?.idempotency_key;
+  return key !== null && key !== undefined && String(key).trim().length > 0;
+}
+export function formalWishes(wishes) {
+  return (Array.isArray(wishes) ? wishes : []).filter(isFormalWish);
+}
 export function safeUrl(value) {
   if (typeof value !== 'string' || /[\u0000-\u001F\u007f]/.test(value)) return null;
   try { const url = new URL(value.trim()); return url.protocol === 'https:' ? url.href : null; } catch { return null; }

@@ -2,6 +2,9 @@
 -- is not installed in this workspace. Do not apply this file manually as a fake
 -- migration: an independent deployer must first run `supabase migration new
 -- phase5_wish_lifecycle` and place this reviewed SQL in the generated file.
+-- The non-destructive Phase 6 isolation follow-up uses the same
+-- `idempotency_key is not null` boundary shown below; it must never rewrite
+-- or delete Stage 1 diagnostic rows whose key is NULL.
 
 alter table public.wishes
   add column if not exists idempotency_key uuid,
@@ -68,7 +71,7 @@ begin
   perform pg_advisory_xact_lock(hashtextextended(v_owner::text, 0));
   select * into v_existing from public.wishes where owner_id=v_owner and idempotency_key=p_idempotency_key;
   if found then return v_existing; end if;
-  select count(*) into v_active from public.wishes where owner_id=v_owner and status in ('sealed','expired');
+  select count(*) into v_active from public.wishes where owner_id=v_owner and idempotency_key is not null and status in ('sealed','expired');
   if v_active >= 5 then raise exception 'active_limit_reached'; end if;
   insert into public.wishes(owner_id, product, evidence, custody_hours, demo_duration_seconds, expires_at, status, promotion_url, idempotency_key, last_seen_at)
   values (v_owner, p_product, p_evidence, p_custody_hours, p_custody_hours, now() + make_interval(secs => p_custody_hours), 'sealed', p_product->>'promotionUrl', p_idempotency_key, now())
@@ -83,9 +86,9 @@ declare v_owner uuid := auth.uid(); v_total integer; v_items jsonb; v_summary js
 begin
   if v_owner is null then raise exception 'authentication_required'; end if;
   update public.wishes set status='expired', updated_at=now(), last_seen_at=now()
-    where owner_id=v_owner and status='sealed' and expires_at <= now();
-  select count(*), jsonb_build_object('wishCount',count(*),'sealedCount',count(*) filter(where status='sealed'),'expiredCount',count(*) filter(where status='expired'),'abandonedCount',count(*) filter(where status='abandoned'),'purchaseIntentCount',count(*) filter(where status='purchased_intent'),'abandonedListedAmount',coalesce(sum(counted_amount) filter(where status='abandoned'),0)) into v_total, v_summary from public.wishes where owner_id=v_owner;
-  select coalesce(jsonb_agg(to_jsonb(w)), '[]'::jsonb) into v_items from (select * from public.wishes where owner_id=v_owner order by case when status='expired' then 0 when status='sealed' then 1 else 2 end, expires_at asc, updated_at desc offset v_offset limit v_page_limit) w;
+    where owner_id=v_owner and idempotency_key is not null and status='sealed' and expires_at <= now();
+  select count(*), jsonb_build_object('wishCount',count(*),'sealedCount',count(*) filter(where status='sealed'),'expiredCount',count(*) filter(where status='expired'),'abandonedCount',count(*) filter(where status='abandoned'),'purchaseIntentCount',count(*) filter(where status='purchased_intent'),'abandonedListedAmount',coalesce(sum(counted_amount) filter(where status='abandoned'),0)) into v_total, v_summary from public.wishes where owner_id=v_owner and idempotency_key is not null;
+  select coalesce(jsonb_agg(to_jsonb(w)), '[]'::jsonb) into v_items from (select * from public.wishes where owner_id=v_owner and idempotency_key is not null order by case when status='expired' then 0 when status='sealed' then 1 else 2 end, expires_at asc, updated_at desc offset v_offset limit v_page_limit) w;
   return jsonb_build_object('items',v_items,'hasMore',v_offset+v_page_limit<v_total,'nextOffset',case when v_offset+v_page_limit<v_total then v_offset+v_page_limit else null end,'summary',v_summary);
 end; $$;
 
@@ -97,24 +100,24 @@ begin
   if v_owner is null then raise exception 'authentication_required'; end if;
   if p_decision not in ('purchase','abandon') then raise exception 'invalid_decision'; end if;
   update public.wishes set status='expired', updated_at=now(), last_seen_at=now()
-    where id=p_wish_id and owner_id=v_owner and status='sealed' and expires_at <= now();
-  select * into v_wish from public.wishes where id=p_wish_id and owner_id=v_owner for update;
+    where id=p_wish_id and owner_id=v_owner and idempotency_key is not null and status='sealed' and expires_at <= now();
+  select * into v_wish from public.wishes where id=p_wish_id and owner_id=v_owner and idempotency_key is not null for update;
   if not found then raise exception 'not_found'; end if;
   if v_wish.status in ('purchased_intent','abandoned') then return v_wish; end if;
   if v_wish.status <> 'expired' then raise exception 'wish_not_expired'; end if;
   update public.wishes set status=case when p_decision='purchase' then 'purchased_intent' else 'abandoned' end,
     decision_at=now(), counted_amount=case when p_decision='abandon' then coalesce(public.phase5_amount_or_null(product->>'estimatedPrice'), public.phase5_amount_or_null(product->>'sellingPrice'), 0::numeric(12,2)) else 0::numeric(12,2) end,
     last_seen_at=now(), updated_at=now()
-  where id=p_wish_id and owner_id=v_owner returning * into v_wish;
+  where id=p_wish_id and owner_id=v_owner and idempotency_key is not null returning * into v_wish;
   return v_wish;
 end; $$;
 
 create or replace function public.delete_my_custody_wish(p_wish_id uuid) returns boolean
 language plpgsql security definer set search_path = '' as $$
-begin if auth.uid() is null then raise exception 'authentication_required'; end if; delete from public.wishes where id=p_wish_id and owner_id=auth.uid(); return found; end; $$;
+begin if auth.uid() is null then raise exception 'authentication_required'; end if; delete from public.wishes where id=p_wish_id and owner_id=auth.uid() and idempotency_key is not null; return found; end; $$;
 create or replace function public.clear_my_custody_wishes() returns integer
 language plpgsql security definer set search_path = '' as $$
-declare n integer; begin if auth.uid() is null then raise exception 'authentication_required'; end if; delete from public.wishes where owner_id=auth.uid() and status in ('purchased_intent','abandoned'); get diagnostics n = row_count; return n; end; $$;
+declare n integer; begin if auth.uid() is null then raise exception 'authentication_required'; end if; delete from public.wishes where owner_id=auth.uid() and idempotency_key is not null and status in ('purchased_intent','abandoned'); get diagnostics n = row_count; return n; end; $$;
 
 revoke all on function public.create_custody_wish(jsonb,jsonb,smallint,uuid) from public, anon;
 revoke all on function public.list_my_custody_wishes(integer,integer) from public, anon;

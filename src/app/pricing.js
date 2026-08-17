@@ -1,5 +1,10 @@
 const yuan = new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY' });
 
+export function finiteNonNegativeMoney(value) {
+  const amount = typeof value === 'number' || typeof value === 'string' ? Number(value) : NaN;
+  return Number.isFinite(amount) && amount >= 0 ? amount : null;
+}
+
 export function priceSnapshot(product) {
   const sellingPrice = Number(product.sellingPrice);
   const estimatedPrice = Number(product.estimatedPrice);
@@ -8,11 +13,12 @@ export function priceSnapshot(product) {
 }
 
 export function displayPrice(value) {
-  return yuan.format(Number(value));
+  const amount = finiteNonNegativeMoney(value);
+  return amount === null ? '价格暂缺' : yuan.format(amount);
 }
 
 export function plannedSpend(record) {
-  return Number(record.priceSnapshot?.estimatedPrice ?? 0);
+  return finiteNonNegativeMoney(record.priceSnapshot?.estimatedPrice) ?? 0;
 }
 
 export function abandonedTotal(records) {

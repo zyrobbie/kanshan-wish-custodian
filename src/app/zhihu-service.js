@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { plainText, safeZhihuUrl, stableZhihuError, truncateUnicode, zhihuErrorCodes } from '../../supabase/functions/_shared/zhihu-evidence.js';
+import { limitUnicode, plainText, safeZhihuUrl, stableZhihuError, truncateUnicode, zhihuErrorCodes } from '../../supabase/functions/_shared/zhihu-evidence.js';
 
 export const zhihuErrorMessages = Object.freeze({
   invalid_query: '商品名称不足，暂不能整理知乎资料。',
@@ -43,7 +43,7 @@ export function normalizeEvidencePayload(data) {
   for (const layer of ['expert', 'experience']) {
     const value = data.layers[layer];
     if (!value || !['ready', 'empty', 'error'].includes(value.status) || !Array.isArray(value.items)) throw new ZhihuEvidenceError('invalid_response');
-    layers[layer] = { status: value.status, items: value.items.filter((item) => isEvidenceItem(item, layer)).map((item) => ({ ...item, title: truncateUnicode(item.title, 180), authorName: truncateUnicode(item.authorName, 80), authorBadgeText: item.authorBadgeText ? truncateUnicode(item.authorBadgeText, 80) : null, contentType: truncateUnicode(item.contentType, 40), summary: truncateUnicode(item.summary, 280), url: safeZhihuUrl(item.url) })) };
+    layers[layer] = { status: value.status, items: value.items.filter((item) => isEvidenceItem(item, layer)).map((item) => ({ ...item, title: truncateUnicode(item.title, 180), authorName: truncateUnicode(item.authorName, 80), authorBadgeText: item.authorBadgeText ? truncateUnicode(item.authorBadgeText, 80) : null, contentType: truncateUnicode(item.contentType, 40), summary: limitUnicode(item.summary, 50), url: safeZhihuUrl(item.url) })) };
     if (layers[layer].status === 'ready' && !layers[layer].items.length) layers[layer].status = 'empty';
   }
   return { coreProductName: truncateUnicode(data.coreProductName, 64), layers, fetchedAt: typeof data.fetchedAt === 'string' ? data.fetchedAt : null };
