@@ -67,7 +67,7 @@ export function createWishTestHarness(name, now = Date.now()) {
         if (!accountDeleteConfirmed) { accountDeleteConfirmed = true; create(80); return { code: 'confirmation_required', count: store.list().length, deleted: false }; }
         store.clear(); auth.clear(); return { code: 'account_deleted', count: store.list().length, deleted: auth.user === null };
       }
-      case 'refresh-restore': { const wish = create(90); return { code: 'refresh_ready', count: store.list().length, expiresAt: wish.expiresAt, status: wish.status }; }
+      case 'refresh-restore': { const wish = create(90, 72); return { code: 'refresh_ready', count: store.list().length, expiresAt: wish.expiresAt, status: wish.status }; }
       default: return { code: 'unsupported' };
     }
   };
@@ -75,7 +75,7 @@ export function createWishTestHarness(name, now = Date.now()) {
     name, store, clock, auth,
     async run() { outcome = await execute(); return outcome; },
     get outcome() { return outcome; },
-    prepareRecovery() { if (name !== 'refresh-restore' || store.list().length) return null; return create(90); },
+    prepareRecovery() { if (name !== 'refresh-restore' || store.list().length) return null; return create(90, 72); },
   };
 }
 

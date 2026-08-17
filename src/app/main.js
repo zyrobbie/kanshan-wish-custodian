@@ -13,7 +13,7 @@ import { AuthService } from './auth-service.js';
 import { WishesService } from './wishes-service.js';
 import { createWishTestHarness, wishTestNames } from './wish-test-scenarios.js';
 import { expiryFromServer, groupWishes, summarizeWishes, WishStatuses } from './wish-domain.js';
-import { recoveryTarget } from './wish-recovery.js';
+import { RecoveryTriggers, recoveryPlan } from './wish-recovery.js';
 
 const isDevelopment = import.meta.env.DEV;
 const root = document.querySelector('#app');
@@ -127,7 +127,11 @@ function renderSearching() {
   const query = flow.query;
   const productMode = flow.productMode;
   const copy = fixtureMode ? ['开发测试数据', '正在整理静态候选', '不会访问真实淘宝联盟接口。'] : wishTestMode ? [`阶段 5 开发测试情景 · ${wishTest}`, '正在演练愿望保管流程', '不会访问 Supabase、淘宝、知乎、邮件或转链服务。'] : productTestMode ? [`开发测试情景 · ${productTest}`, '正在演练商品搜索状态', '不会访问 Supabase 或淘宝联盟接口。'] : ['淘宝联盟实时候选', '正在搜索符合条件的商品', '仅展示当次返回且可推广的候选。'];
-  shell(`<section class="center-state"><span class="loader" aria-hidden="true"></span><p class="eyebrow">${copy[0]}</p><h1>${copy[1]}</h1><p>${copy[2]}</p></section>`);
+  shell(`<section class="center-state"><span class="loader" aria-hidden="true"></span><p class="eyebrow">${copy[0]}</p><h1>${copy[1]}</h1><p>${copy[2]}</p>${wishTestMode ? '<button class="quiet-button" id="simulate-background-return" type="button">模拟后台返回（开发测试）</button>' : ''}</section>`);
+  root.querySelector('#simulate-background-return')?.addEventListener('click', () => { void recover(RecoveryTriggers.BACKGROUND_RETURN); });
+  // Give the explicit local recovery control enough time to exercise a
+  // background return before the local product fixture completes.
+  const searchDelay = wishTestMode ? 1_500 : 420;
   setTimeout(async () => {
     try {
       const result = fixtureMode ? { products: await repository.search(query, productMode) } : await productService.search(query);
@@ -140,7 +144,7 @@ function renderSearching() {
       flow = { ...flow, error: error.message };
       save(States.ERROR);
     }
-  }, 420);
+  }, searchDelay);
 }
 
 function renderProducts() {
@@ -318,18 +322,35 @@ function renderWishes() {
 function renderError() { const label = fixtureMode ? '开发测试错误状态' : productTestMode || evidenceTestMode ? `开发测试情景 · ${evidenceTest ?? productTest}` : flow.failedStage === 'evidence' ? '知乎证据未完成' : '商品搜索未完成'; shell(`<section class="error-state"><p class="eyebrow">${label}</p><h1>这一步不能继续</h1><p>${escape(flow.error ?? '发生了未分类错误。')}</p><button class="primary" data-action="home">返回首页</button></section>`); }
 
 function handleAction(event) { event.preventDefault(); const action = event.currentTarget.dataset.action; if (action === 'home') { invalidateTasks(); view = Views.FLOW; if (fixtureMode) repository.clearFlow(); flow = fixtureMode ? repository.getFlow() : { state: States.IDLE }; render(); } if (action === 'wishes') { invalidateTasks(); view = Views.WISHES; render(); } if (action === 'products') { invalidateTasks(); view = Views.FLOW; save(States.PRODUCT_SELECTING); } if (action === 'custody') { view = Views.FLOW; save(States.CUSTODY_CONFIG); } }
-async function recover() {
+async function recover(trigger = RecoveryTriggers.INITIAL_LOAD) {
   if (recoveryInFlight || fixtureMode || productTestMode) return;
   recoveryInFlight = true;
   try {
-    if (wishTestMode) wishScenario.prepareRecovery();
-    else await authService.ensureSession();
-    const target = recoveryTarget(await getTimeline());
-    if (target.reason === 'none_active') return;
-    view = target.view;
-    if (target.record) flow = { state: target.state, record: target.record, recordId: target.record.id };
-    render();
+    if (wishTestMode) {
+      if (trigger === RecoveryTriggers.INITIAL_LOAD) wishScenario.prepareRecovery();
+    } else {
+      await authService.ensureSession();
+    }
+    const plan = recoveryPlan({
+      trigger,
+      currentView: view,
+      currentState: flow.state,
+      currentRecordId: flow.recordId ?? flow.record?.id ?? null,
+      wishes: await getTimeline(),
+    });
+    if (plan.action === 'replace_view') {
+      view = plan.view;
+      if (plan.record) flow = { state: plan.state, record: plan.record, recordId: plan.record.id };
+      render();
+    } else if (plan.action === 'refresh_current') {
+      flow = { ...flow, state: plan.state, record: plan.record, recordId: plan.record.id };
+      render();
+    } else if (plan.action === 'refresh_wishes') {
+      renderWishes();
+    }
   } catch { /* recovery never replaces a usable view with a raw provider error */ }
   finally { recoveryInFlight = false; }
 }
-document.addEventListener('visibilitychange', () => { if (!document.hidden) void recover(); }); window.addEventListener('pageshow', () => void recover()); render(); void recover();
+document.addEventListener('visibilitychange', () => { if (!document.hidden) void recover(RecoveryTriggers.BACKGROUND_RETURN); });
+window.addEventListener('pageshow', (event) => { if (event.persisted) void recover(RecoveryTriggers.BACKGROUND_RETURN); });
+render(); void recover(RecoveryTriggers.INITIAL_LOAD);
