@@ -100,7 +100,7 @@ Deno.serve(async (request) => {
     let summaries: Map<string, string> | null = null;
     let summaryStatus = "fallback";
     try {
-      summaries = await compressEvidenceBatch(selected, secret);
+      summaries = await compressEvidenceBatch(selected, secret, queries.coreProductName);
       summaryStatus = summaries ? "zhida" : "fallback";
     } catch {
       // Zhida is an optional rendering enhancement. Its failures must never

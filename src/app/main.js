@@ -271,7 +271,7 @@ function renderPurchase(record) {
 }
 function renderAbandoned(record) {
   const amount = Number(record.countedAmount ?? 0);
-  shell(`<section class="outcome-card"><div class="state-heading"><div><p class="eyebrow">已放下 · 计划支出记录</p><h1 class="outcome-title">这次先不买，也是一种决定。</h1></div>${liuKanshan('release')}</div>${productSlot}<p class="metric">本次放下的计划支出：${displayPrice(amount)}</p><p id="abandon-summary" class="notice">正在读取累计记录…</p><p>金额是计划支出记录，不是真实财务收益，也不代表实际省下的钱。</p><div class="decision-row"><button class="secondary" data-action="wishes">查看我的愿望</button><button class="quiet-button" data-action="home">回到首页</button></div></section>`);
+  shell(`<section class="outcome-card"><div class="state-heading"><div><p class="eyebrow">已放下 · 计划支出记录</p><h1 class="outcome-title">这次就先不买了</h1></div>${liuKanshan('release')}</div>${productSlot}<p class="metric">本次放下的计划支出：${displayPrice(amount)}</p><p id="abandon-summary" class="notice">正在读取累计记录…</p><p>金额是计划支出记录，不是真实财务收益，也不代表实际省下的钱。</p><div class="decision-row"><button class="secondary" data-action="wishes">查看我的愿望</button><button class="quiet-button" data-action="home">回到首页</button></div></section>`);
   mountProductSummary(record.product);
   const summary = root.querySelector('#abandon-summary');
   void getWishPage(0).then((page) => {

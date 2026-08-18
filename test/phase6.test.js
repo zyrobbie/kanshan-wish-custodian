@@ -72,3 +72,9 @@ test('phase6 abandon accounting stays server-domain based: purchase intent is ex
   assert.equal(summary.abandonedCount, 1);
   assert.equal(summary.abandonedListedAmount, 30);
 });
+
+test('phase6 abandonment result uses the final approved wording', () => {
+  const main = readFileSync(new URL('../src/app/main.js', import.meta.url), 'utf8');
+  assert.match(main, /这次就先不买了/);
+  assert.doesNotMatch(main, /这次先不买，也是一种决定/);
+});

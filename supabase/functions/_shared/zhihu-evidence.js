@@ -5,6 +5,10 @@ const promotionWords = /(?:官方|旗舰|正品|包邮|送礼|爆款|热卖|新�
 const quantityWords = /(?:\b\d+(?:\.\d+)?\s*(?:ml|l|g|kg|mm|cm|寸|件|个|只|片|包|盒|套|支|袋)\b|\d+\s*(?:件|个|只|片|包|盒|套|支|袋))/gi;
 const experienceSignal = /(?:用了?|使用(?:了|过|中)?|长期|半年|一年|几个月|每天|通勤|家里|办公室|清洗|维护|故障|闲置|积灰|后悔|优缺点|不推荐|买了|入手|退货|收纳|场景)/i;
 const expertSignal = /(?:测评|参数|原理|性能|对比|区别|适合|选购|推荐|优缺点|评测|指标|材质|续航|噪音|效率|规格|成像|画质|功能|限制|成本)/i;
+const expertDecisionFact = /(?:参数|性能|显示|分辨率|亮度|续航|重量|佩戴|延迟|视场角|识别|翻译|导航|录音|相机|成像|画质|价格|生态|兼容|隐私|发热|交互|功能|限制|准确|清晰|音质|降噪|容量|功耗|材质|尺寸|速度|效率|成本|清洗|维护|对比|区别)/iu;
+const experienceDecisionFact = /(?:用了?|使用|佩戴|通勤|出门|室内|户外|长时间|每天|一周|一个月|半年|充电|续航|发热|卡顿|故障|清洗|维护|收纳|闲置|退货|适应|舒适|压鼻|夹头|看不清|听不清|准确|方便|麻烦)/iu;
+const decisionOutcome = /(?:适合|不适合|优点|缺点|建议|需要|无需|可以|不能|不过|但是|但|容易|较高|较低|更快|更慢|更轻|更重|清晰|模糊|准确|不准|方便|麻烦|限制|不足|值得|不值得|推荐|不推荐|影响|导致|续航|发热)/u;
+const vagueSummary = /(?:文章|本文|作者|废话|保证|期待|期盼|以上|以下|前文|后文|这些顾虑|以上顾虑|大家讨论|围绕讨论|更多还是围绕|无法亲自使用|没有办法亲自使用|未来会有|以后会有|彻底消除|值得关注|拭目以待)/u;
 
 export const zhihuErrorCodes = Object.freeze(new Set([
   'invalid_query', 'authentication_required', 'origin_not_allowed', 'service_not_configured',
@@ -46,12 +50,15 @@ function titleRestatement(summary, title = '') {
 
 /** A public card must stand on its own: a complete, non-promotional statement
  * containing an observable opinion, condition, result, or factual detail. */
-export function isInformativeSummary(value, title = '') {
+export function isInformativeSummary(value, title = '', layer = null) {
   const summary = plainText(value);
   const size = Array.from(summary).length;
   if (size < 12 || size > 50 || !/[。；;]$/.test(summary)) return false;
-  if (/[？?]/.test(summary) || marketingSignals.test(summary) || titleRestatement(summary, title)) return false;
-  return summarySignals.test(summary);
+  if (/[？?]/.test(summary) || marketingSignals.test(summary) || vagueSummary.test(summary) || titleRestatement(summary, title)) return false;
+  if (!summarySignals.test(summary) || !decisionOutcome.test(summary)) return false;
+  if (layer === 'expert') return expertDecisionFact.test(summary);
+  if (layer === 'experience') return experienceDecisionFact.test(summary);
+  return expertDecisionFact.test(summary) || experienceDecisionFact.test(summary);
 }
 
 function decisionValue(sentence, layer = 'expert') {
@@ -66,7 +73,7 @@ function decisionValue(sentence, layer = 'expert') {
 export function fallbackEvidenceSummary(value, layer = 'expert') {
   const candidate = splitEvidenceSentences(value)
     .map((sentence, index) => ({ sentence: limitUnicode(sentence, 50), index }))
-    .filter(({ sentence }) => isInformativeSummary(sentence))
+    .filter(({ sentence }) => isInformativeSummary(sentence, '', layer))
     .sort((left, right) => decisionValue(right.sentence, layer) - decisionValue(left.sentence, layer) || left.index - right.index)
     .map(({ sentence }) => sentence)[0];
   return candidate ?? null;
@@ -157,6 +164,10 @@ const genericProductTerms = new Set([
   '商品', '产品', '推荐', '测评', '评测', '体验', '使用', '值得', '购买', '适合', '官方', '自营', '旗舰', '新款', '原装', '配件', '海外版', '升级', '升级版',
 ]);
 
+const genericIdentityTerms = new Set([
+  'ai', '智能', '眼镜', '智能眼镜', '相机', '拍立得', '耳机', '手机', '电脑', '笔记本', '咖啡机', '硬件', '设备', '产品', '商品',
+]);
+
 export function coreTokens(coreProductName) {
   const chunks = plainText(coreProductName).toLowerCase().match(/[a-z0-9][a-z0-9-]{1,}|[\p{Script=Han}]{2,}/gu) ?? [];
   const tokens = [];
@@ -175,9 +186,36 @@ export function coreTokens(coreProductName) {
     .slice(0, 32);
 }
 
+/** Brand/model anchors stop broad category articles from taking over a card.
+ * Generic product names still use the ordinary category relevance path. */
+export function identityTokens(coreProductName) {
+  const chunks = plainText(coreProductName).toLowerCase().match(/[a-z0-9][a-z0-9-]{1,}|[\p{Script=Han}]{2,}/gu) ?? [];
+  const identities = [];
+  for (const chunk of chunks) {
+    if (!/^[\p{Script=Han}]+$/u.test(chunk)) {
+      if (/\d/u.test(chunk) || chunk.length >= 3) identities.push(chunk);
+      continue;
+    }
+    if (genericIdentityTerms.has(chunk)) continue;
+    const characters = Array.from(chunk);
+    if (characters.length <= 8) identities.push(chunk);
+    if (characters.length >= 4) identities.push(characters.slice(0, 2).join(''));
+  }
+  return Array.from(new Set(identities))
+    .filter((token) => Array.from(token).length >= 2 && !genericProductTerms.has(token) && !genericIdentityTerms.has(token))
+    .slice(0, 12);
+}
+
 function relevance(item, coreProductName) {
   const text = `${item.title} ${item.summary}`.toLowerCase();
   return coreTokens(coreProductName).reduce((score, token) => score + (text.includes(token) ? Math.min(Array.from(token).length, 4) : 0), 0);
+}
+
+function matchesIdentity(item, coreProductName) {
+  const identities = identityTokens(coreProductName);
+  if (!identities.length) return true;
+  const text = `${item.title} ${item.summary}`.toLowerCase();
+  return identities.some((token) => text.includes(token));
 }
 
 function score(item, layer, coreProductName) {
@@ -192,6 +230,7 @@ export function selectEvidence(rawItems, layer, coreProductName, used = new Set(
     .map((raw) => mapZhihuItem(raw, layer))
     .filter(Boolean)
     .filter((item) => relevance(item, coreProductName) > 0)
+    .filter((item) => matchesIdentity(item, coreProductName))
     .filter((item) => (layer === 'experience' ? experienceSignal : expertSignal).test(`${item.title} ${item.summary}`))
     .filter((item) => !used.has(item.id) && !used.has(item.url))
     .map((item) => ({ ...item, _score: score(item, layer, coreProductName) }))
@@ -217,20 +256,20 @@ export function validateZhidaSummaries(value, items) {
   const summaries = new Map();
   for (const item of items) {
     const summary = mapping[item.id];
-    if (typeof summary !== 'string' || !isInformativeSummary(summary, item.title)) return null;
-    summaries.set(item.id, plainText(summary));
+    if (typeof summary === 'string' && isInformativeSummary(summary, item.title, item.layer)) summaries.set(item.id, plainText(summary));
   }
-  return summaries;
+  return summaries.size ? summaries : null;
 }
 
 /** One Zhida request compresses the selected evidence batch. The function
  * receives only already-selected items and does not log their content. */
-export async function compressEvidenceBatch(items, secret, { fetchImpl = fetch } = {}) {
+export async function compressEvidenceBatch(items, secret, coreProductName = '', { fetchImpl = fetch } = {}) {
   const batch = Array.isArray(items) ? items.slice(0, 6) : [];
   if (!batch.length) return null;
   const payload = batch.map((item) => ({
     id: item.id,
     layer: item.layer,
+    product: truncateUnicode(coreProductName, 64),
     title: truncateUnicode(item.title, 100),
     content: prepareEvidenceForZhida(item.sourceText ?? item.summary, item.layer),
   }));
@@ -243,7 +282,7 @@ export async function compressEvidenceBatch(items, secret, { fetchImpl = fetch }
     },
     body: JSON.stringify({
       model: 'zhida-fast-1p5', stream: false,
-      messages: [{ role: 'system', content: '只依据给定原文压缩，不补充事实。每条必须是12到50个Unicode字符、以。或；结尾的完整陈述句。expert层优先提取参数、性能、差异、适用人群、局限或选购结论中最影响购买决定的一点；experience层优先提取真实场景、长期优缺点、故障维护或闲置原因。不要摘开场白和背景介绍。禁止问题、感叹、标题复述、营销语、寒暄和无信息短句。仅输出严格 JSON：{"内容ID":"摘要"}。' }, { role: 'user', content: JSON.stringify(payload) }],
+      messages: [{ role: 'system', content: '你是购买决策编辑，只依据给定原文提炼，不补充事实。每条必须是12到50个Unicode字符、以。或；结尾，且单独阅读即可理解。摘要必须同时包含：一项具体产品事实，以及它对使用、适用人群或购买取舍的明确影响。expert层只提取参数、性能、差异、适用人群、局限或选购结论；experience层只提取真实场景、长期优缺点、故障维护或闲置原因。优先保留品牌、型号、功能、数值和具体场景。禁止开场白、文章评价、作者自述、行业泛谈、未来期待、问题、感叹、标题复述、营销语、寒暄和指代不明的句子。原文没有有效结论时，对应值输出空字符串。仅输出严格 JSON：{"内容ID":"摘要"}。' }, { role: 'user', content: JSON.stringify(payload) }],
     }),
     signal: AbortSignal.timeout(10_000),
   });
@@ -259,7 +298,7 @@ export function finalizeEvidenceSummaries(items, summaries = null) {
   return (Array.isArray(items) ? items : [])
     .map(({ sourceText, summary, ...item }) => {
       const candidate = summaries?.get(item.id) ?? fallbackEvidenceSummary(sourceText ?? summary, item.layer);
-      if (!isInformativeSummary(candidate, item.title)) return null;
+      if (!isInformativeSummary(candidate, item.title, item.layer)) return null;
       return { ...item, summary: candidate };
     })
     .filter(Boolean);
