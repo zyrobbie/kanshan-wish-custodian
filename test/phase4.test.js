@@ -141,3 +141,16 @@ test('browser source keeps external evidence text out of HTML interpolation and 
   assert.match(main, /link\.rel = 'noopener noreferrer'/);
   assert.equal(main.includes('window.open(item.url'), false);
 });
+
+test('evidence footer leads with custody and keeps the three mobile actions on stable rows', () => {
+  const main = readFileSync(new URL('../src/app/main.js', import.meta.url), 'utf8');
+  const styles = readFileSync(new URL('../src/app/styles.css', import.meta.url), 'utf8');
+  const custody = main.indexOf('data-action="custody"');
+  const products = main.indexOf('data-action="products"', custody);
+  const home = main.indexOf('data-action="home"', products);
+  assert.match(main, /还没决定？先把这个愿望交给看山保存一会吧/);
+  assert.ok(custody >= 0 && products > custody && home > products);
+  assert.match(styles, /\.evidence-actions[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/);
+  assert.match(styles, /\.evidence-actions \.primary[^}]*grid-column:\s*1 \/ -1/);
+  assert.match(styles, /\.evidence-actions button[^}]*white-space:\s*nowrap/);
+});

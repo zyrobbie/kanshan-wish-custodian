@@ -213,14 +213,11 @@ function appendEvidenceSection(target, label, layer) {
 function renderEvidence() {
   const { evidence } = flow;
   const label = fixtureMode ? '开发测试数据 · 知乎证据样例' : evidenceTestMode ? `开发测试情景 · ${evidenceTest}` : '知乎双层内容';
-  const article = `<section><p class="eyebrow">${label}</p><h1>给决定多一点可追溯的参考</h1>${productSlot}<div id="evidence-layers"></div><p id="evidence-notice" class="notice"></p><div class="decision-row"><button class="secondary" data-action="products">返回重选商品</button><button class="quiet-button" data-action="home">开始新的搜索</button></div></section>`;
+  const article = `<section><p class="eyebrow">${label}</p><h1>给决定多一点可追溯的参考</h1>${productSlot}<div id="evidence-layers"></div><p id="evidence-notice" class="notice">还没决定？先把这个愿望交给看山保存一会吧</p><div class="evidence-actions"><button class="primary" type="button" data-action="custody">交给看山保管</button><button class="secondary" type="button" data-action="products">返回重选商品</button><button class="quiet-button" type="button" data-action="home">开始新的搜索</button></div></section>`;
   shell(article); mountProductSummary(flow.product);
   const target = root.querySelector('#evidence-layers');
   appendEvidenceSection(target, '专业解读', evidence.layers.expert);
   appendEvidenceSection(target, '真实体验', evidence.layers.experience);
-  const bothEmpty = evidence.layers.expert.status === 'empty' && evidence.layers.experience.status === 'empty';
-  root.querySelector('#evidence-notice').textContent = bothEmpty ? '本次未找到足够相关的知乎资料。资料不足不会替用户作决定，仍可自行选择保管。' : '搜索摘要不是完整原文；请自行查看来源。资料不足不会替用户作决定。';
-  const actions = root.querySelector('.decision-row'); const custody = document.createElement('button'); custody.className = 'primary'; custody.type = 'button'; custody.dataset.action = 'custody'; custody.textContent = '交给看山保管'; custody.addEventListener('click', handleAction); actions.append(custody);
 }
 
 function normalizeWish(record) {
