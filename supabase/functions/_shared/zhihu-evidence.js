@@ -28,10 +28,48 @@ export function limitUnicode(value, max = 50) {
   return Array.from(plainText(value)).slice(0, max).join('');
 }
 
+const summarySignals = /(?:因为|由于|因此|所以|但是|但|不过|需要|适合|不适合|建议|优点|缺点|使用|清洗|维护|材质|参数|性能|容量|温度|价格|性价比|耐[^。？！!?]{0,8}|容易|困难|方便|影响|导致|选择|购买|推荐|不推荐|长期|实际|可以|不能|会|不易|更[^。？！!?]{0,8})/u;
+const marketingSignals = /(?:点击|关注|第一时间|不会走散|官方|旗舰|正品|包邮|爆款|热卖|限时|优惠|促销|同款|私信|加群|领取)/u;
+
+function splitEvidenceSentences(value) {
+  return plainText(value)
+    .split(/(?<=[。！？!?；;])/u)
+    .map((sentence) => sentence.trim())
+    .filter(Boolean);
+}
+
+function titleRestatement(summary, title = '') {
+  const normalizedSummary = plainText(summary).replace(/[。；;！!？?]/g, '');
+  const normalizedTitle = plainText(title).replace(/[。；;！!？?]/g, '');
+  return normalizedSummary.length >= 12 && normalizedTitle.includes(normalizedSummary);
+}
+
+/** A public card must stand on its own: a complete, non-promotional statement
+ * containing an observable opinion, condition, result, or factual detail. */
+export function isInformativeSummary(value, title = '') {
+  const summary = plainText(value);
+  const size = Array.from(summary).length;
+  if (size < 12 || size > 50 || !/[。；;]$/.test(summary)) return false;
+  if (/[？?]/.test(summary) || marketingSignals.test(summary) || titleRestatement(summary, title)) return false;
+  return summarySignals.test(summary);
+}
+
 export function fallbackEvidenceSummary(value) {
-  const text = plainText(value);
-  const firstSentence = text.match(/^(.{1,200}?[。！？!?；;])/u)?.[1] ?? text;
-  return limitUnicode(firstSentence, 50);
+  const candidate = splitEvidenceSentences(value)
+    .map((sentence) => limitUnicode(sentence, 50))
+    .find((sentence) => isInformativeSummary(sentence));
+  return candidate ?? null;
+}
+
+/** Keep the one batch call focused on useful source passages, not title-like
+ * introductions, calls to action, or long unrelated boilerplate. */
+export function prepareEvidenceForZhida(value) {
+  const candidates = splitEvidenceSentences(value)
+    .filter((sentence) => !/[？?]/.test(sentence) && !marketingSignals.test(sentence))
+    .filter((sentence) => Array.from(sentence).length >= 12)
+    .slice(0, 3);
+  const prepared = candidates.join(' ');
+  return truncateUnicode(prepared || plainText(value), 480);
 }
 
 export function cleanProductTitle(value) {
@@ -147,8 +185,8 @@ export function validateZhidaSummaries(value, items) {
   const summaries = new Map();
   for (const item of items) {
     const summary = mapping[item.id];
-    if (typeof summary !== 'string' || !plainText(summary) || Array.from(summary).length > 50) return null;
-    summaries.set(item.id, summary);
+    if (typeof summary !== 'string' || !isInformativeSummary(summary, item.title)) return null;
+    summaries.set(item.id, plainText(summary));
   }
   return summaries;
 }
@@ -158,7 +196,7 @@ export function validateZhidaSummaries(value, items) {
 export async function compressEvidenceBatch(items, secret, { fetchImpl = fetch } = {}) {
   const batch = Array.isArray(items) ? items.slice(0, 6) : [];
   if (!batch.length) return null;
-  const payload = batch.map((item) => ({ id: item.id, content: item.sourceText ?? item.summary }));
+  const payload = batch.map((item) => ({ id: item.id, content: prepareEvidenceForZhida(item.sourceText ?? item.summary) }));
   const response = await fetchImpl('https://developer.zhihu.com/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -168,7 +206,7 @@ export async function compressEvidenceBatch(items, secret, { fetchImpl = fetch }
     },
     body: JSON.stringify({
       model: 'zhida-fast-1p5', stream: false,
-      messages: [{ role: 'system', content: '只依据给定原文压缩，不补充事实。仅输出严格 JSON：{"内容ID":"不超过50个Unicode字符的摘要"}。' }, { role: 'user', content: JSON.stringify(payload) }],
+      messages: [{ role: 'system', content: '只依据给定原文压缩，不补充事实。每条必须是12到50个Unicode字符、以。或；结尾的完整陈述句，表达一个明确知识、经验或判断。禁止问题、感叹、标题复述、营销语、寒暄和无信息短句。仅输出严格 JSON：{"内容ID":"摘要"}。' }, { role: 'user', content: JSON.stringify(payload) }],
     }),
     signal: AbortSignal.timeout(10_000),
   });
@@ -181,10 +219,23 @@ export async function compressEvidenceBatch(items, secret, { fetchImpl = fetch }
 }
 
 export function finalizeEvidenceSummaries(items, summaries = null) {
-  return (Array.isArray(items) ? items : []).map(({ sourceText, summary, ...item }) => ({
-    ...item,
-    summary: limitUnicode(summaries?.get(item.id) ?? fallbackEvidenceSummary(sourceText ?? summary), 50),
-  }));
+  return (Array.isArray(items) ? items : [])
+    .map(({ sourceText, summary, ...item }) => {
+      const candidate = summaries?.get(item.id) ?? fallbackEvidenceSummary(sourceText ?? summary);
+      if (!isInformativeSummary(candidate, item.title)) return null;
+      return { ...item, summary: candidate };
+    })
+    .filter(Boolean);
+}
+
+/** Preserve the layer contract after low-quality cards have been removed. */
+export function finalizeEvidenceLayer(layer, summaries = null) {
+  const items = finalizeEvidenceSummaries(layer?.items, summaries);
+  return {
+    ...layer,
+    items,
+    status: layer?.status === 'ready' && !items.length ? 'empty' : layer?.status,
+  };
 }
 
 export function providerErrorCode({ status, code, name } = {}) {

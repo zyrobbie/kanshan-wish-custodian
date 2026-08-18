@@ -1,5 +1,5 @@
 import { cors, json, requireAllowedOrigin } from "../_shared/http.ts";
-import { buildZhihuQueries, compressEvidenceBatch, finalizeEvidenceSummaries, providerErrorCode, selectEvidence } from "../_shared/zhihu-evidence.js";
+import { buildZhihuQueries, compressEvidenceBatch, finalizeEvidenceLayer, providerErrorCode, selectEvidence } from "../_shared/zhihu-evidence.js";
 
 const endpoint = "https://developer.zhihu.com/api/v1/content/zhihu_search";
 const layerNames = ["expert", "experience"] as const;
@@ -107,7 +107,7 @@ Deno.serve(async (request) => {
       // turn already-retrieved Zhihu evidence into a page-level failure.
       summaryStatus = "fallback";
     }
-    for (const layer of layerNames) layers[layer].items = finalizeEvidenceSummaries(layers[layer].items, summaries);
+    for (const layer of layerNames) layers[layer] = finalizeEvidenceLayer(layers[layer], summaries);
     log({ ok: true, category: "success", expert_status: layers.expert.status, experience_status: layers.experience.status, expert_count: expertCount, experience_count: experienceCount, summary_status: summaryStatus, duration_ms: Date.now() - startedAt });
     return json({ ok: true, coreProductName: queries.coreProductName, layers, fetchedAt: new Date().toISOString() }, 200, origin);
   } catch {

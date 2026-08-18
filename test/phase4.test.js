@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  buildZhihuQueries, cleanProductTitle, compressEvidenceBatch, fallbackEvidenceSummary, finalizeEvidenceSummaries,
-  mapZhihuItem, plainText, providerErrorCode, safeZhihuUrl, selectEvidence, truncateUnicode,
+  buildZhihuQueries, cleanProductTitle, compressEvidenceBatch, fallbackEvidenceSummary, finalizeEvidenceLayer, finalizeEvidenceSummaries,
+  isInformativeSummary, mapZhihuItem, plainText, prepareEvidenceForZhida, providerErrorCode, safeZhihuUrl, selectEvidence, truncateUnicode,
 } from '../supabase/functions/_shared/zhihu-evidence.js';
 import { EvidenceTestService, evidenceTestName } from '../src/app/evidence-test-scenarios.js';
 import { extractZhihuErrorCode, normalizeEvidencePayload, ZhihuEvidenceError, ZhihuEvidenceService } from '../src/app/zhihu-service.js';
@@ -54,21 +54,45 @@ test('provider failures use only stable Zhihu categories', () => {
   assert.equal(providerErrorCode({ name: 'TimeoutError' }), 'provider_timeout');
 });
 
-test('Zhida batch summaries are strict, limited to six, and failures fall back to 50 Unicode characters', async () => {
+test('Zhida batch summaries are informative, limited to six, and failures retain only quality fallbacks', async () => {
   const selected = Array.from({ length: 7 }, (_, index) => ({ ...mapZhihuItem(item({ ContentID: String(index), ContentText: `第${index}条内容。${'长文本'.repeat(40)}` }), 'expert'), id: String(index) }));
   let request;
   const summaries = await compressEvidenceBatch(selected, 'secret-never-logged', { fetchImpl: async (_url, init) => {
     request = JSON.parse(init.body);
-    return { ok: true, json: async () => ({ choices: [{ message: { content: JSON.stringify(Object.fromEntries(selected.slice(0,6).map((entry) => [entry.id, `摘要${entry.id}`]))) } }] }) };
+    return { ok: true, json: async () => ({ choices: [{ message: { content: JSON.stringify(Object.fromEntries(selected.slice(0,6).map((entry) => [entry.id, `长期使用后清洗维护成本较高，需要结合频率选择。`]))) } }] }) };
   } });
   assert.equal(request.model, 'zhida-fast-1p5'); assert.equal(JSON.parse(request.messages[1].content).length, 6);
+  assert.ok(JSON.parse(request.messages[1].content).every((entry) => Array.from(entry.content).length <= 480));
   const final = finalizeEvidenceSummaries(selected.slice(0,6), summaries);
-  assert.ok(final.every((entry) => Array.from(entry.summary).length <= 50));
+  assert.ok(final.every((entry) => isInformativeSummary(entry.summary) && Array.from(entry.summary).length <= 50));
   assert.equal(final[0].sourceText, undefined);
   await assert.rejects(() => compressEvidenceBatch(selected.slice(0,1), 'x', { fetchImpl: async () => ({ ok: false, status: 504, json: async () => ({}) }) }));
   await assert.rejects(() => compressEvidenceBatch(selected.slice(0,1), 'x', { fetchImpl: async () => ({ ok: true, json: async () => ({ choices: [{ message: { content: '{bad json}' } }] }) }) }));
   await assert.rejects(() => compressEvidenceBatch(selected.slice(0,1), 'x', { fetchImpl: async () => ({ ok: true, json: async () => ({ choices: [{ message: { content: JSON.stringify({ 0: 'x'.repeat(51) }) } }] }) }) }));
-  assert.ok(Array.from(fallbackEvidenceSummary('第一句很长。第二句')).length <= 50);
+  await assert.rejects(() => compressEvidenceBatch(selected.slice(0,1), 'x', { fetchImpl: async () => ({ ok: true, json: async () => ({ choices: [{ message: { content: JSON.stringify({ 0: '这是什么？' }) } }] }) }) }));
+  assert.equal(fallbackEvidenceSummary('这是什么？谁懂啊！长期使用后清洗维护较麻烦，需要结合频率选择。'), '长期使用后清洗维护较麻烦，需要结合频率选择。');
+});
+
+test('summary quality rejects questions, exclamations, title echoes and unsafe fallback material', () => {
+  assert.equal(isInformativeSummary('这款马克杯值得买吗？'), false);
+  assert.equal(isInformativeSummary('谁懂啊！'), false);
+  assert.equal(isInformativeSummary('长期维护成本较高，需要结合使用频率选择。'), true);
+  assert.equal(isInformativeSummary('😀'.repeat(12)), false);
+  assert.equal(isInformativeSummary('使用后需要定期清洗，否则容易残留异味。'.repeat(4)), false);
+  assert.equal(isInformativeSummary('<b>长期使用</b>后清洗频率较高，需要考虑维护成本。'), true);
+  assert.equal(isInformativeSummary('马克杯带盖勺陶瓷杯子女士新款家用喝茶水杯男办公室咖啡杯高颜值。', '马克杯带盖勺陶瓷杯子女士新款家用喝茶水杯男办公室咖啡杯高颜值'), false);
+  assert.equal(fallbackEvidenceSummary('标题复述。要不要买？谁懂啊！'), null);
+  assert.ok(Array.from(prepareEvidenceForZhida('要不要买？谁懂啊！长期使用后清洗频率较高，需要考虑维护成本。'.repeat(20))).length <= 480);
+});
+
+test('final evidence filtering can leave each layer empty instead of showing a meaningless card', () => {
+  const weak = mapZhihuItem(item({ ContentText: '要不要买？谁懂啊！', ContentID: 'weak' }), 'expert');
+  assert.deepEqual(finalizeEvidenceSummaries([weak]), []);
+  assert.deepEqual(finalizeEvidenceLayer({ status: 'ready', items: [weak] }), { status: 'empty', items: [] });
+  const withOpinion = mapZhihuItem(item({ ContentText: '先提一个问题？长期使用后清洗频率较高，需要考虑维护成本。', ContentID: 'opinion' }), 'expert');
+  const final = finalizeEvidenceSummaries([weak, withOpinion]);
+  assert.equal(final.length, 1);
+  assert.equal(final[0].id, 'opinion');
 });
 
 test('frontend accepts only a complete stable evidence payload', () => {
