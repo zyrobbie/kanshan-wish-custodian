@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  buildZhihuQueries, cleanProductTitle, compressEvidenceBatch, fallbackEvidenceSummary, finalizeEvidenceLayer, finalizeEvidenceSummaries,
+  buildZhihuQueries, cleanProductTitle, compressEvidenceBatch, coreTokens, fallbackEvidenceSummary, finalizeEvidenceLayer, finalizeEvidenceSummaries,
   isInformativeSummary, mapZhihuItem, plainText, prepareEvidenceForZhida, providerErrorCode, safeZhihuUrl, selectEvidence, truncateUnicode,
 } from '../supabase/functions/_shared/zhihu-evidence.js';
 import { EvidenceTestService, evidenceTestName } from '../src/app/evidence-test-scenarios.js';
@@ -39,11 +39,19 @@ test('Zhihu mapping cleans highlights, preserves only safe fields and truncates 
 test('expert and experience layers filter independently and deduplicate across layers', () => {
   const used = new Set();
   const expert = selectEvidence([item(), item({ ContentID: 'promo', Title: '促销链接', ContentText: '购买链接' })], 'expert', 'XK-100 咖啡机', used);
-  const experience = selectEvidence([item({ ContentID: '456' }), item({ ContentID: '789', Url: 'https://zhuanlan.zhihu.com/p/789', Title: '长期使用体验', ContentText: '我用了半年，清洗维护很麻烦，最后积灰。' })], 'experience', 'XK-100 咖啡机', used);
+  const experience = selectEvidence([item({ ContentID: '456' }), item({ ContentID: '789', Url: 'https://zhuanlan.zhihu.com/p/789', Title: 'XK-100 咖啡机长期使用体验', ContentText: '我用了半年，清洗维护很麻烦，最后积灰。' })], 'experience', 'XK-100 咖啡机', used);
   assert.equal(expert.length >= 1, true);
   assert.equal(experience.length, 1);
   assert.equal(experience[0].id, '789');
   assert.equal(selectEvidence([item({ ContentText: '没有体验描述', ContentID: 'no-experience' })], 'experience', 'XK-100 咖啡机').length, 0);
+});
+
+test('evidence relevance rejects unrelated categories even when they look experiential', () => {
+  assert.ok(coreTokens('富士拍立得 instax mini13 可爱胶卷相机').includes('拍立得'));
+  const unrelated = item({ ContentID: 'wash', Title: '618 洗护用品推荐', ContentText: '我用了半年，泡沫柔软，清洗后长期留香。' });
+  const related = item({ ContentID: 'camera', Title: '富士拍立得 instax mini13 长期体验', ContentText: '使用半年后，室内成像容易偏暗，需要留意补光。' });
+  assert.equal(selectEvidence([unrelated], 'experience', '富士拍立得 instax mini13').length, 0);
+  assert.deepEqual(selectEvidence([unrelated, related], 'experience', '富士拍立得 instax mini13').map((entry) => entry.id), ['camera']);
 });
 
 test('provider failures use only stable Zhihu categories', () => {
@@ -62,7 +70,8 @@ test('Zhida batch summaries are informative, limited to six, and failures retain
     return { ok: true, json: async () => ({ choices: [{ message: { content: JSON.stringify(Object.fromEntries(selected.slice(0,6).map((entry) => [entry.id, `长期使用后清洗维护成本较高，需要结合频率选择。`]))) } }] }) };
   } });
   assert.equal(request.model, 'zhida-fast-1p5'); assert.equal(JSON.parse(request.messages[1].content).length, 6);
-  assert.ok(JSON.parse(request.messages[1].content).every((entry) => Array.from(entry.content).length <= 480));
+  assert.ok(JSON.parse(request.messages[1].content).every((entry) => entry.layer === 'expert' && entry.title && Array.from(entry.content).length <= 480));
+  assert.match(request.messages[0].content, /expert层优先提取参数、性能、差异/);
   const final = finalizeEvidenceSummaries(selected.slice(0,6), summaries);
   assert.ok(final.every((entry) => isInformativeSummary(entry.summary) && Array.from(entry.summary).length <= 50));
   assert.equal(final[0].sourceText, undefined);
@@ -71,6 +80,7 @@ test('Zhida batch summaries are informative, limited to six, and failures retain
   await assert.rejects(() => compressEvidenceBatch(selected.slice(0,1), 'x', { fetchImpl: async () => ({ ok: true, json: async () => ({ choices: [{ message: { content: JSON.stringify({ 0: 'x'.repeat(51) }) } }] }) }) }));
   await assert.rejects(() => compressEvidenceBatch(selected.slice(0,1), 'x', { fetchImpl: async () => ({ ok: true, json: async () => ({ choices: [{ message: { content: JSON.stringify({ 0: '这是什么？' }) } }] }) }) }));
   assert.equal(fallbackEvidenceSummary('这是什么？谁懂啊！长期使用后清洗维护较麻烦，需要结合频率选择。'), '长期使用后清洗维护较麻烦，需要结合频率选择。');
+  assert.equal(fallbackEvidenceSummary('长期来说还可以。续航实测约八小时，通勤一天无需补电。', 'expert'), '续航实测约八小时，通勤一天无需补电。');
 });
 
 test('summary quality rejects questions, exclamations, title echoes and unsafe fallback material', () => {
@@ -149,6 +159,8 @@ test('evidence footer leads with custody and keeps the three mobile actions on s
   const products = main.indexOf('data-action="products"', custody);
   const home = main.indexOf('data-action="home"', products);
   assert.match(main, /还没决定？先把这个愿望交给看山保存一会吧/);
+  assert.match(main, /看看专业答主和知友怎么说/);
+  assert.doesNotMatch(main, /'知乎双层内容'/);
   assert.ok(custody >= 0 && products > custody && home > products);
   assert.match(styles, /\.evidence-actions[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/);
   assert.match(styles, /\.evidence-actions \.primary[^}]*grid-column:\s*1 \/ -1/);

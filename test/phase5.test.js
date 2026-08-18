@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DevelopmentWishStore, DemoDurations, WishDomainError, WishStatuses, expiryFromServer, formalWishes, groupWishes, snapshotProduct, summarizeWishes } from '../src/app/wish-domain.js';
+import { DevelopmentWishStore, DemoDurations, WishDomainError, WishStatuses, expiryFromServer, formalWishes, groupWishes, normalizeWishSummary, snapshotProduct, summarizeWishes } from '../src/app/wish-domain.js';
 import { AuthService } from '../src/app/auth-service.js';
 import { buildWishScenario, createWishTestHarness, wishTestNames } from '../src/app/wish-test-scenarios.js';
 import { RecoveryTriggers, recoveryPlan, recoveryTarget } from '../src/app/wish-recovery.js';
@@ -19,6 +19,11 @@ test('phase5 create is idempotent and capped at five active wishes', () => { con
 test('phase5 restores absolute expiry and expires sealed wishes', () => { let now=0; const store=new DevelopmentWishStore({now:()=>now}); const wish=store.create({product,evidence,duration:24,idempotencyKey:key(1)}); now=24_000; assert.equal(store.list()[0].status, WishStatuses.EXPIRED); assert.equal(expiryFromServer(wish.expiresAt, now), 0); });
 test('phase5 decision first write wins and abandonment counts once', () => { let now=0; const store=new DevelopmentWishStore({now:()=>now}); const wish=store.create({product,evidence,duration:24,idempotencyKey:key(1)}); now=25_000; store.list(); assert.equal(store.decide(wish.id,'abandon').countedAmount, 88); assert.equal(store.decide(wish.id,'purchase').status, WishStatuses.ABANDONED); assert.equal(summarizeWishes(store.list()).abandonedListedAmount,88); });
 test('phase5 purchase intent does not count as abandoned amount', () => { let now=0; const store=new DevelopmentWishStore({now:()=>now}); const wish=store.create({product,evidence,duration:24,idempotencyKey:key(1)}); now=25_000; store.list(); assert.equal(store.decide(wish.id,'purchase').countedAmount,0); assert.equal(summarizeWishes(store.list()).abandonedListedAmount,0); });
+test('phase5 keeps the validated all-pages RPC summary instead of undercounting the first page', () => {
+  const server = { wishCount: 22, sealedCount: 0, expiredCount: 0, abandonedCount: 2, purchaseIntentCount: 20, abandonedListedAmount: '2770.75' };
+  assert.deepEqual(normalizeWishSummary(server, []), { ...server, abandonedListedAmount: 2770.75 });
+  assert.deepEqual(normalizeWishSummary({ ...server, abandonedCount: 'bad' }, []), summarizeWishes([]));
+});
 test('phase5 groups, sorts and pages wishes', async () => { const scenario=createWishTestHarness('pagination',0); const outcome=await scenario.run(); const result=groupWishes(scenario.store.list(), {page:0,pageSize:20,now:1_000_000}); assert.equal(outcome.count,22); assert.equal(result.items.length,20); assert.equal(result.hasMore,true); assert.ok(result.groups.completed.length); });
 test('phase5 development scenarios are explicit local behaviors', async () => { assert.ok(wishTestNames.includes('purchase-invalid-link')); for(const name of wishTestNames) { const harness=createWishTestHarness(name, 0); assert.ok(harness); if (name !== 'refresh-restore') assert.ok(await harness.run()); } });
 test('phase5 behavioral scenarios change local data and expose stable results', async () => {

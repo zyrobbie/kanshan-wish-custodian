@@ -75,6 +75,17 @@ export function summarizeWishes(wishes, now = Date.now()) {
   return { wishCount: synced.length, sealedCount: count(WishStatuses.SEALED), expiredCount: count(WishStatuses.EXPIRED), abandonedCount: count(WishStatuses.ABANDONED), purchaseIntentCount: count(WishStatuses.PURCHASED_INTENT), abandonedListedAmount: synced.filter((wish) => wish.status === WishStatuses.ABANDONED).reduce((sum, wish) => sum + (money(wish.countedAmount) ?? 0), 0) };
 }
 
+/** The list RPC returns an all-pages summary. Preserve it after validating the
+ * stable numeric shape; recomputing from the first page silently undercounts. */
+export function normalizeWishSummary(summary, fallbackItems = []) {
+  const fields = ['wishCount', 'sealedCount', 'expiredCount', 'abandonedCount', 'purchaseIntentCount', 'abandonedListedAmount'];
+  if (!summary || typeof summary !== 'object') return summarizeWishes(fallbackItems);
+  const normalized = Object.fromEntries(fields.map((field) => [field, Number(summary[field])]));
+  if (fields.some((field) => !Number.isFinite(normalized[field]) || normalized[field] < 0)) return summarizeWishes(fallbackItems);
+  for (const field of fields.slice(0, 5)) normalized[field] = Math.trunc(normalized[field]);
+  return normalized;
+}
+
 export class WishDomainError extends Error { constructor(code) { super(code); this.code = code; } }
 export class DevelopmentWishStore {
   constructor({ now = () => Date.now() } = {}) { this.now = now; this.wishes = []; this.keys = new Map(); this.sequence = 0; }

@@ -10,7 +10,7 @@ export function productTestName(search) {
 const baseProduct = Object.freeze({
   provider: 'taobao',
   itemId: 'local-test-item',
-  title: '开发测试商品',
+  title: '【原装配件】大疆无人机 DJI Care 随心换 neo/mini4k/mini3/mini4pro/御mavic4pro/avata2/mini5pro/flip',
   imageUrl: 'http://127.0.0.1:5177/product-test-image.svg',
   price: 39.8,
   finalPrice: 29.8,

@@ -4,7 +4,7 @@ const tags = /<[^>]*>/g;
 const promotionWords = /(?:官方|旗舰|正品|包邮|送礼|爆款|热卖|新品|限时|优惠|特惠|促销|同款|现货|专柜|升级版|家用|商用|套装|礼盒)/gi;
 const quantityWords = /(?:\b\d+(?:\.\d+)?\s*(?:ml|l|g|kg|mm|cm|寸|件|个|只|片|包|盒|套|支|袋)\b|\d+\s*(?:件|个|只|片|包|盒|套|支|袋))/gi;
 const experienceSignal = /(?:用了?|使用(?:了|过|中)?|长期|半年|一年|几个月|每天|通勤|家里|办公室|清洗|维护|故障|闲置|积灰|后悔|优缺点|不推荐|买了|入手|退货|收纳|场景)/i;
-const expertSignal = /(?:测评|参数|原理|性能|对比|适合|优缺点|评测|指标|材质|续航|噪音|效率|规格)/i;
+const expertSignal = /(?:测评|参数|原理|性能|对比|区别|适合|选购|推荐|优缺点|评测|指标|材质|续航|噪音|效率|规格|成像|画质|功能|限制|成本)/i;
 
 export const zhihuErrorCodes = Object.freeze(new Set([
   'invalid_query', 'authentication_required', 'origin_not_allowed', 'service_not_configured',
@@ -28,7 +28,7 @@ export function limitUnicode(value, max = 50) {
   return Array.from(plainText(value)).slice(0, max).join('');
 }
 
-const summarySignals = /(?:因为|由于|因此|所以|但是|但|不过|需要|适合|不适合|建议|优点|缺点|使用|清洗|维护|材质|参数|性能|容量|温度|价格|性价比|耐[^。？！!?]{0,8}|容易|困难|方便|影响|导致|选择|购买|推荐|不推荐|长期|实际|可以|不能|会|不易|更[^。？！!?]{0,8})/u;
+const summarySignals = /(?:因为|由于|因此|所以|但是|但|不过|需要|无需|适合|不适合|建议|优点|缺点|使用|实测|清洗|维护|材质|参数|性能|续航|容量|温度|价格|性价比|耐[^。？！!?]{0,8}|容易|困难|方便|影响|导致|选择|购买|推荐|不推荐|长期|实际|可以|不能|会|不易|更[^。？！!?]{0,8})/u;
 const marketingSignals = /(?:点击|关注|第一时间|不会走散|官方|旗舰|正品|包邮|爆款|热卖|限时|优惠|促销|同款|私信|加群|领取)/u;
 
 function splitEvidenceSentences(value) {
@@ -54,21 +54,34 @@ export function isInformativeSummary(value, title = '') {
   return summarySignals.test(summary);
 }
 
-export function fallbackEvidenceSummary(value) {
+function decisionValue(sentence, layer = 'expert') {
+  const text = plainText(sentence);
+  const layerSignal = layer === 'experience' ? experienceSignal : expertSignal;
+  return Number(layerSignal.test(text)) * 8
+    + Number(summarySignals.test(text)) * 4
+    + Number(/\d|%|毫米|厘米|克|小时|分钟|张|次|元/u.test(text)) * 2
+    + Math.min(Array.from(text).length, 50) / 100;
+}
+
+export function fallbackEvidenceSummary(value, layer = 'expert') {
   const candidate = splitEvidenceSentences(value)
-    .map((sentence) => limitUnicode(sentence, 50))
-    .find((sentence) => isInformativeSummary(sentence));
+    .map((sentence, index) => ({ sentence: limitUnicode(sentence, 50), index }))
+    .filter(({ sentence }) => isInformativeSummary(sentence))
+    .sort((left, right) => decisionValue(right.sentence, layer) - decisionValue(left.sentence, layer) || left.index - right.index)
+    .map(({ sentence }) => sentence)[0];
   return candidate ?? null;
 }
 
 /** Keep the one batch call focused on useful source passages, not title-like
  * introductions, calls to action, or long unrelated boilerplate. */
-export function prepareEvidenceForZhida(value) {
+export function prepareEvidenceForZhida(value, layer = 'expert') {
   const candidates = splitEvidenceSentences(value)
     .filter((sentence) => !/[？?]/.test(sentence) && !marketingSignals.test(sentence))
     .filter((sentence) => Array.from(sentence).length >= 12)
+    .map((sentence, index) => ({ sentence, index }))
+    .sort((left, right) => decisionValue(right.sentence, layer) - decisionValue(left.sentence, layer) || left.index - right.index)
     .slice(0, 3);
-  const prepared = candidates.join(' ');
+  const prepared = candidates.map(({ sentence }) => sentence).join(' ');
   return truncateUnicode(prepared || plainText(value), 480);
 }
 
@@ -140,13 +153,31 @@ export function mapZhihuItem(raw, layer) {
   };
 }
 
-function coreTokens(coreProductName) {
-  return Array.from(new Set(plainText(coreProductName).split(/[\s,，、/]+/).filter((token) => Array.from(token).length >= 2))).slice(0, 8);
+const genericProductTerms = new Set([
+  '商品', '产品', '推荐', '测评', '评测', '体验', '使用', '值得', '购买', '适合', '官方', '自营', '旗舰', '新款', '原装', '配件', '海外版', '升级', '升级版',
+]);
+
+export function coreTokens(coreProductName) {
+  const chunks = plainText(coreProductName).toLowerCase().match(/[a-z0-9][a-z0-9-]{1,}|[\p{Script=Han}]{2,}/gu) ?? [];
+  const tokens = [];
+  for (const chunk of chunks) {
+    if (!/^[\p{Script=Han}]+$/u.test(chunk)) { tokens.push(chunk); continue; }
+    const characters = Array.from(chunk);
+    if (characters.length <= 6) tokens.push(chunk);
+    if (characters.length >= 4) {
+      for (const size of [4, 3, 2]) {
+        for (let index = 0; index <= characters.length - size; index += 1) tokens.push(characters.slice(index, index + size).join(''));
+      }
+    }
+  }
+  return Array.from(new Set(tokens))
+    .filter((token) => Array.from(token).length >= 2 && !genericProductTerms.has(token) && !/^\d+$/.test(token))
+    .slice(0, 32);
 }
 
 function relevance(item, coreProductName) {
   const text = `${item.title} ${item.summary}`.toLowerCase();
-  return coreTokens(coreProductName).reduce((score, token) => score + (text.includes(token.toLowerCase()) ? 2 : 0), 0);
+  return coreTokens(coreProductName).reduce((score, token) => score + (text.includes(token) ? Math.min(Array.from(token).length, 4) : 0), 0);
 }
 
 function score(item, layer, coreProductName) {
@@ -160,7 +191,8 @@ export function selectEvidence(rawItems, layer, coreProductName, used = new Set(
   const candidates = (Array.isArray(rawItems) ? rawItems : [])
     .map((raw) => mapZhihuItem(raw, layer))
     .filter(Boolean)
-    .filter((item) => layer !== 'experience' || experienceSignal.test(`${item.title} ${item.summary}`))
+    .filter((item) => relevance(item, coreProductName) > 0)
+    .filter((item) => (layer === 'experience' ? experienceSignal : expertSignal).test(`${item.title} ${item.summary}`))
     .filter((item) => !used.has(item.id) && !used.has(item.url))
     .map((item) => ({ ...item, _score: score(item, layer, coreProductName) }))
     .filter((item) => item._score > 0)
@@ -196,7 +228,12 @@ export function validateZhidaSummaries(value, items) {
 export async function compressEvidenceBatch(items, secret, { fetchImpl = fetch } = {}) {
   const batch = Array.isArray(items) ? items.slice(0, 6) : [];
   if (!batch.length) return null;
-  const payload = batch.map((item) => ({ id: item.id, content: prepareEvidenceForZhida(item.sourceText ?? item.summary) }));
+  const payload = batch.map((item) => ({
+    id: item.id,
+    layer: item.layer,
+    title: truncateUnicode(item.title, 100),
+    content: prepareEvidenceForZhida(item.sourceText ?? item.summary, item.layer),
+  }));
   const response = await fetchImpl('https://developer.zhihu.com/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -206,7 +243,7 @@ export async function compressEvidenceBatch(items, secret, { fetchImpl = fetch }
     },
     body: JSON.stringify({
       model: 'zhida-fast-1p5', stream: false,
-      messages: [{ role: 'system', content: '只依据给定原文压缩，不补充事实。每条必须是12到50个Unicode字符、以。或；结尾的完整陈述句，表达一个明确知识、经验或判断。禁止问题、感叹、标题复述、营销语、寒暄和无信息短句。仅输出严格 JSON：{"内容ID":"摘要"}。' }, { role: 'user', content: JSON.stringify(payload) }],
+      messages: [{ role: 'system', content: '只依据给定原文压缩，不补充事实。每条必须是12到50个Unicode字符、以。或；结尾的完整陈述句。expert层优先提取参数、性能、差异、适用人群、局限或选购结论中最影响购买决定的一点；experience层优先提取真实场景、长期优缺点、故障维护或闲置原因。不要摘开场白和背景介绍。禁止问题、感叹、标题复述、营销语、寒暄和无信息短句。仅输出严格 JSON：{"内容ID":"摘要"}。' }, { role: 'user', content: JSON.stringify(payload) }],
     }),
     signal: AbortSignal.timeout(10_000),
   });
@@ -221,7 +258,7 @@ export async function compressEvidenceBatch(items, secret, { fetchImpl = fetch }
 export function finalizeEvidenceSummaries(items, summaries = null) {
   return (Array.isArray(items) ? items : [])
     .map(({ sourceText, summary, ...item }) => {
-      const candidate = summaries?.get(item.id) ?? fallbackEvidenceSummary(sourceText ?? summary);
+      const candidate = summaries?.get(item.id) ?? fallbackEvidenceSummary(sourceText ?? summary, item.layer);
       if (!isInformativeSummary(candidate, item.title)) return null;
       return { ...item, summary: candidate };
     })
